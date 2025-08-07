@@ -1,0 +1,262 @@
+<?xml version="1.0" ?>
+<robot name="stewart_platform" xmlns:xacro="http://www.ros.org/wiki/xacro">
+    <!-- BASE PRINCIPAL -->
+    <link name="base_link">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.25 0.25 0.01"/>
+            </geometry>
+            <material name="gray">
+                <color rgba="0.6 0.4 0.6 0.5"/>
+            </material>
+        </visual>
+    </link>
+
+    <!-- DOT 1 (derecha) -->
+    <link name="dot1_base">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.005 0.005 0.005"/>
+            </geometry>
+            <material name="grey"/>
+        </visual>
+    </link>
+    <joint name="joint_dot1_base" type="fixed">
+        <parent link="base_link"/>
+        <child link="dot1_base"/>
+        <origin xyz="0.085 0 0.005" rpy="0 0 0"/>
+    </joint>
+
+    <link name="dot1">
+        <visual>
+            <origin xyz="0 -0.015 0" rpy="-1.7 1.571 0.0"/>
+            <geometry>
+                <mesh filename="meshes/dot.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    <joint name="joint_dot1" type="revolute">
+        <parent link="dot1_base"/>
+        <child link="dot1"/>
+        <origin xyz="0 0 0.005" rpy="0 0 0"/> <!-- justo encima del cubito -->
+        <axis xyz="0 1 0"/> <!-- eje X para que gire hacia arriba -->
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+
+    <link name="arm1">
+        <visual>
+            <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/> <!-- Ajustable -->
+            <geometry>
+                <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    <joint name="joint_arm1" type="revolute">
+        <parent link="dot1"/>
+        <child link="arm1"/>
+        <origin xyz="0.0065 0 -0.006" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/> <!-- Eje de rotación: X -->
+        <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
+    </joint>
+
+    <link name="arm1_tip">
+        <visual>
+            <origin xyz="0 0 0.0" rpy="0 0 0"/> <!-- opcionalmente invisible -->
+            <geometry>
+                <sphere radius="0.005"/> <!-- pequeña para visualización -->
+            </geometry>
+            <material name="green"/>
+        </visual>
+    </link>
+
+    <joint name="joint_arm1_tip_x" type="revolute">
+        <parent link="arm1"/>
+        <child link="arm1_tip"/>
+        <origin xyz="0.018 0 0.075" rpy="0 0 0"/> <!-- ajustar según longitud exacta del brazo -->
+        <axis xyz="1 0 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+    <!--     <joint name="joint_arm1_tip_y" type="revolute">
+        <parent link="arm1_tip"/>
+        <child link="top"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/> 
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+    -->
+    <link name="arm2">
+        <visual>
+            <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+            <geometry>
+                <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    <joint name="joint_arm2" type="revolute">
+        <parent link="dot2"/>
+        <child link="arm2"/>
+        <origin xyz="0.0065 0 -0.006" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
+    </joint>
+
+    <link name="arm3">
+        <visual>
+            <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+            <geometry>
+                <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    <link name="arm2_tip">
+        <visual>
+            <origin xyz="0 0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="green"/>
+        </visual>
+    </link>
+
+    <joint name="joint_arm2_tip_x" type="revolute">
+        <parent link="arm2"/>
+        <child link="arm2_tip"/>
+        <origin xyz="0.018 0 0.075" rpy="0 0 0"/> <!-- Longitud del brazo -->
+        <axis xyz="1 0 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+    <!--     <joint name="joint_arm2_tip_y" type="revolute">
+        <parent link="arm2_tip"/>
+        <child link="top"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint> -->
+
+    <joint name="joint_arm3" type="revolute">
+        <parent link="dot3"/>
+        <child link="arm3"/>
+        <origin xyz="0.0065 0 -0.006" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
+    </joint>
+
+    <!-- DOT 2 (superior izquierda) -->
+    <link name="dot2_base">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.005 0.005 0.005"/>
+            </geometry>
+            <material name="grey"/>
+        </visual>
+    </link>
+    <joint name="joint_dot2_base" type="fixed">
+        <parent link="base_link"/>
+        <child link="dot2_base"/>
+        <origin xyz="-0.0425 0.0736 0.005" rpy="0 0 0"/>
+    </joint>
+
+    <link name="dot2">
+        <visual>
+            <origin xyz="0 -0.0095 0" rpy="-1.7 1.571 0.0"/>
+            <geometry>
+                <mesh filename="meshes/dot.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    <joint name="joint_dot2" type="revolute">
+        <parent link="dot2_base"/>
+        <child link="dot2"/>
+        <origin xyz="0 0 0.005" rpy="0 0 2.0944"/> <!-- rotado 120° = 2π/3 -->
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+
+
+
+    <!-- DOT 3 (inferior izquierda) -->
+    <link name="dot3_base">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <box size="0.005 0.005 0.005"/>
+            </geometry>
+            <material name="grey"/>
+        </visual>
+    </link>
+    <joint name="joint_dot3_base" type="fixed">
+        <parent link="base_link"/>
+        <child link="dot3_base"/>
+        <origin xyz="-0.0425 -0.0736 0.005" rpy="0 0 0"/>
+    </joint>
+
+    <link name="dot3">
+        <visual>
+            <origin xyz="0 -0.015 0" rpy="-1.7 1.571 0.0"/>
+            <geometry>
+                <mesh filename="meshes/dot.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    <joint name="joint_dot3" type="revolute">
+        <parent link="dot3_base"/>
+        <child link="dot3"/>
+        <origin xyz="0 0 0.005" rpy="0 0 -2.0944"/> <!-- rotado -120° = -2π/3 -->
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+
+    <link name="arm3_tip">
+        <visual>
+            <origin xyz="0 0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="green"/>
+        </visual>
+    </link>
+
+    <joint name="joint_arm3_tip_x" type="revolute">
+        <parent link="arm3"/>
+        <child link="arm3_tip"/>
+        <origin xyz="0.018 0 0.075" rpy="0 0 0"/>
+        <axis xyz="1 0 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+    <!-- 
+    <joint name="joint_arm3_tip_y" type="revolute">
+        <parent link="arm3_tip"/>
+        <child link="top"/>
+
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint> -->
+
+    <link name="top">
+        <visual>
+            <origin xyz="-0.1095 0 -0.0025" rpy="0 0 -0.15"/> <!-- ahora lo posicionaremos vía joint -->
+            <geometry>
+                <mesh filename="meshes/top.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+            <material name="blue"/>
+        </visual>
+    </link>
+
+    
+</robot>
