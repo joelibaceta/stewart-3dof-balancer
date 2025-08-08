@@ -4,20 +4,28 @@
 <link name="base_link">
     <inertial>
         <origin xyz="0 0 0" rpy="0 0 0"/>
-        <mass value="1.0"/> <!-- Puedes ajustar según el peso real -->
+        <mass value="1.0"/>
         <inertia 
             ixx="0.01" iyy="0.01" izz="0.01" 
             ixy="0" ixz="0" iyz="0"/>
     </inertial>
+    
     <visual>
         <origin xyz="0 0 0" rpy="0 0 0"/>
         <geometry>
-            <box size="0.25 0.25 0.01"/>
+            <box size="0.25 0.25 0.006"/>
         </geometry>
         <material name="gray">
             <color rgba="0.6 0.4 0.6 0.5"/>
         </material>
     </visual>
+
+    <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+            <box size="0.25 0.25 0.006"/>
+        </geometry>
+    </collision>
 </link>
 
 
@@ -40,7 +48,7 @@
          <collision>
         <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <box size="0.005 0.005 0.005"/>
+                <box size="0.005 0.005  0.003"/>
             </geometry>
         </collision>
     </link>
@@ -66,7 +74,7 @@
             <material name="blue"/>
         </visual>
         <collision>
-            <origin xyz="0 -0.015 0" rpy="-1.7 1.571 0.0"/>
+            <origin xyz="-0.012 0.007 0" rpy="-1.55 1.571 3.2"/>
             <geometry>
                 <mesh filename="meshes/dot.stl" scale="0.001 0.001 0.001"/>
             </geometry>
@@ -99,7 +107,7 @@
         </visual>
 
         <collision>
-            <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+            <origin xyz="0.0314 0.000 0.0583" rpy="2.1 0 1.6"/>
             <geometry>
                 <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
             </geometry>
@@ -174,7 +182,7 @@
     </visual>
 
     <collision>
-        <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+        <origin xyz="0.0314 0.000 0.0583" rpy="2.1 0 1.6"/>
         <geometry>
             <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
         </geometry>
@@ -208,7 +216,7 @@
     </visual>
 
     <collision>
-        <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+        <origin xyz="0.0314 0.000 0.0583" rpy="2.1 0 1.6"/>
         <geometry>
             <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
         </geometry>
@@ -277,7 +285,7 @@
     <visual>
         <origin xyz="0 0 0" rpy="0 0 0"/>
         <geometry>
-            <box size="0.005 0.005 0.005"/>
+            <box size="0.005 0.005  0.003"/>
         </geometry>
         <material name="grey"/>
     </visual>
@@ -315,7 +323,7 @@
     </visual>
 
     <collision>
-        <origin xyz="0 -0.0095 0" rpy="-1.7 1.571 0.0"/>
+        <origin xyz="-0.012 0.007 0" rpy="-1.55 1.571 3.2"/>
         <geometry>
             <mesh filename="meshes/dot.stl" scale="0.001 0.001 0.001"/>
         </geometry>
@@ -346,7 +354,7 @@
     <visual>
         <origin xyz="0 0 0" rpy="0 0 0"/>
         <geometry>
-            <box size="0.005 0.005 0.005"/>
+            <box size="0.005 0.005  0.003"/>
         </geometry>
         <material name="grey"/>
     </visual>
@@ -384,7 +392,7 @@
     </visual>
 
     <collision>
-        <origin xyz="0 -0.015 0" rpy="-1.7 1.571 0.0"/>
+        <origin xyz="-0.012 0.007 0" rpy="-1.55 1.571 3.2"/>
         <geometry>
             <mesh filename="meshes/dot.stl" scale="0.001 0.001 0.001"/>
         </geometry>
