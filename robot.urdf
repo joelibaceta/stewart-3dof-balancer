@@ -91,7 +91,7 @@
         </inertial>
 
         <visual>
-            <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+            <origin xyz="0.0314 0.000 0.0583" rpy="2.1 0 1.6"/>
             <geometry>
                 <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
             </geometry>
@@ -110,7 +110,7 @@
     <joint name="joint_arm1" type="revolute">
         <parent link="dot1"/>
         <child link="arm1"/>
-        <origin xyz="0.0065 0 -0.006" rpy="0 0 0"/>
+        <origin xyz="-0.012 0 -0.00" rpy="0 0 0"/>
         <axis xyz="0 1 0"/> <!-- Eje de rotación: X -->
         <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
     </joint>
@@ -144,7 +144,7 @@
     <joint name="joint_arm1_tip_x" type="revolute">
         <parent link="arm1"/>
         <child link="arm1_tip"/>
-        <origin xyz="0.018 0 0.075" rpy="0 0 0"/> <!-- ajustar según longitud exacta del brazo -->
+        <origin xyz="0.0415 0.0 0.071" rpy="0 0 0"/> <!-- ajustar según longitud exacta del brazo -->
         <axis xyz="1 0 0"/>
         <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
     </joint>
@@ -166,7 +166,7 @@
     </inertial>
 
     <visual>
-        <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+        <origin xyz="0.0314 0.000 0.0583" rpy="2.1 0 1.6"/>
         <geometry>
             <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
         </geometry>
@@ -185,7 +185,7 @@
     <joint name="joint_arm2" type="revolute">
         <parent link="dot2"/>
         <child link="arm2"/>
-        <origin xyz="0.0065 0 -0.006" rpy="0 0 0"/>
+        <origin xyz="-0.012 0 -0.00" rpy="0 0 0"/>
         <axis xyz="0 1 0"/>
         <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
     </joint>
@@ -200,7 +200,7 @@
     </inertial>
 
     <visual>
-        <origin xyz="0.0125 0.0 0.0645" rpy="2.1 0 1.6"/>
+        <origin xyz="0.0314 0.000 0.0583" rpy="2.1 0 1.6"/>
         <geometry>
             <mesh filename="meshes/arm.stl" scale="0.001 0.001 0.001"/>
         </geometry>
@@ -245,7 +245,7 @@
     <joint name="joint_arm2_tip_x" type="revolute">
         <parent link="arm2"/>
         <child link="arm2_tip"/>
-        <origin xyz="0.018 0 0.075" rpy="0 0 0"/> <!-- Longitud del brazo -->
+        <origin xyz="0.0415 0.0 0.071" rpy="0 0 0"/>  <!-- Longitud del brazo -->
         <axis xyz="1 0 0"/>
         <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
     </joint>
@@ -260,7 +260,7 @@
     <joint name="joint_arm3" type="revolute">
         <parent link="dot3"/>
         <child link="arm3"/>
-        <origin xyz="0.0065 0 -0.006" rpy="0 0 0"/>
+        <origin xyz="-0.012 0 -0.00" rpy="0 0 0"/>
         <axis xyz="0 1 0"/>
         <limit lower="-1.57" upper="1.57" effort="1.0" velocity="1.0"/>
     </joint>
@@ -431,7 +431,7 @@
     <joint name="joint_arm3_tip_x" type="revolute">
         <parent link="arm3"/>
         <child link="arm3_tip"/>
-        <origin xyz="0.018 0 0.075" rpy="0 0 0"/>
+        <origin xyz="0.0415 0.0 0.071" rpy="0 0 0"/> 
         <axis xyz="1 0 0"/>
         <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
     </joint>
