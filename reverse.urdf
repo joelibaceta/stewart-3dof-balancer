@@ -1,0 +1,103 @@
+<?xml version="1.0" ?>
+<robot name="stewart_platform" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <link name="top_plate">
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 -0.155"/>
+            <geometry>
+                <mesh filename="meshes/triangle_filled.stl" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </visual>
+    </link>
+
+    <link name="arm1_tip">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0.01"/>
+            <inertia 
+                ixx="1e-6" iyy="1e-6" izz="1e-6" 
+                ixy="0" ixz="0" iyz="0"/>
+        </inertial>
+
+        <visual>
+            <origin xyz="0 0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="green"/>
+        </visual>
+
+        <collision>
+            <origin xyz="0 0 0.0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="arm2_tip">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0.01"/>
+            <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="green"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <link name="arm3_tip">
+        <inertial>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <mass value="0.01"/>
+            <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+            <material name="green"/>
+        </visual>
+        <collision>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+                <sphere radius="0.005"/>
+            </geometry>
+        </collision>
+    </link>
+
+    <joint name="joint_top_to_tip1" type="revolute">
+        <parent link="top_plate"/>
+        <child link="arm1_tip"/>
+        <origin xyz="0.11 0.000 0.00" rpy="0 0 0"/> <!-- vértice 1 -->
+        <axis xyz="0 1 0"/> <!-- rotación en eje X -->
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+    <joint name="joint_top_to_tip2" type="revolute">
+        <parent link="top_plate"/>
+        <child link="arm2_tip"/>
+        <origin xyz="-0.055 -0.0950 0.00" rpy="0 0.0 -2.1"/> <!-- vértice 1 -->
+        <axis xyz="0 1 0"/> <!-- rotación en eje X -->
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+    <joint name="joint_top_to_tip3" type="revolute">
+        <parent link="top_plate"/>
+        <child link="arm3_tip"/>
+        <origin xyz="-0.055 0.0950 0.00" rpy="0 0.0 2.1"/> <!-- vértice 1 -->
+        <axis xyz="0 1 0"/> <!-- rotación en eje X -->
+        <limit lower="-1.57" upper="1.57" effort="1" velocity="1"/>
+    </joint>
+
+
+</robot>
