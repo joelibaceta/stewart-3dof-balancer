@@ -45,12 +45,6 @@
             </geometry>
             <material name="grey"/>
         </visual>
-         <collision>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-            <geometry>
-                <box size="0.005 0.005  0.003"/>
-            </geometry>
-        </collision>
     </link>
     <joint name="joint_dot1_base" type="fixed">
         <parent link="base_link"/>
@@ -283,19 +277,14 @@
     </inertial>
 
     <visual>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <origin xyz="0 0.00 0" rpy="0 0 0.45"/>
         <geometry>
             <box size="0.005 0.005  0.003"/>
         </geometry>
         <material name="grey"/>
     </visual>
 
-    <collision>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-        <geometry>
-            <box size="0.005 0.005 0.005"/>
-        </geometry>
-    </collision>
+ 
 </link>
 
 
@@ -352,19 +341,14 @@
     </inertial>
     
     <visual>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <origin xyz="0 0 0" rpy="0 0 -0.55"/>
         <geometry>
             <box size="0.005 0.005  0.003"/>
         </geometry>
         <material name="grey"/>
     </visual>
     
-    <collision>
-        <origin xyz="0 0 0" rpy="0 0 0"/>
-        <geometry>
-            <box size="0.005 0.005 0.005"/>
-        </geometry>
-    </collision>
+
 </link>
 
 
