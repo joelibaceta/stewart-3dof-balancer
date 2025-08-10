@@ -13,7 +13,7 @@ class ActorCriticCNN(nn.Module):
         action_dim: int = 3,
         feature_dim: int = 256,
         logstd_init: float = -0.5,
-        obs_shape=None  # <- NUEVO (compat con PPO)
+        obs_shape=None
     ):
         super().__init__()
 
