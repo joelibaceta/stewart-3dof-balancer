@@ -8,3 +8,4 @@ gymnasium
 torch>=2.0.0
 torchvision>=0.15.0
 tqdm>=4.65.0
+tensorboard

@@ -1,15 +1,15 @@
 import torch
 import torch.nn.functional as F
-from .models.actor_critic import ActorCritic
+from .models.actor_critic import ActorCriticCNN
 from .storage import RolloutBuffer
 
-class PPOTrainer:
+class PPO:
     def __init__(self, obs_shape=(3,84,84), action_dim=3, device="cuda" if torch.cuda.is_available() else "cpu",
                  lr=3e-4, n_steps=2048, batch_size=256, epochs=4,
                  gamma=0.99, gae_lambda=0.95,
                  clip_coef=0.2, vf_coef=0.5, ent_coef=0.01, max_grad_norm=0.5):
         self.device = device
-        self.model = ActorCritic(obs_shape=obs_shape, action_dim=action_dim).to(device)
+        self.model = ActorCriticCNN(obs_shape=obs_shape, action_dim=action_dim).to(device)
         self.opt = torch.optim.Adam(self.model.parameters(), lr=lr, eps=1e-5)
         self.n_steps, self.batch_size, self.epochs = n_steps, batch_size, epochs
         self.gamma, self.gae_lambda = gamma, gae_lambda

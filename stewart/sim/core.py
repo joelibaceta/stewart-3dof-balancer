@@ -1,15 +1,19 @@
 # stewart/sim/core.py
 import pybullet as p, pybullet_data, numpy as np
-
+from importlib import resources
 class StewartSimCore:
     def __init__(self, use_gui=False, img_size=84):
         self.img_w = self.img_h = img_size
         p.connect(p.GUI if use_gui else p.DIRECT, options="--opengl2")
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0,0,-9.81)
-        p.loadURDF("assets/plane.urdf")
+        p.loadURDF("plane.urdf")
         self.rng = np.random.default_rng()
-        self.robot_id = p.loadURDF("assets/robot.urdf", [0,0,0.1], useFixedBase=True)
+        assets_root = resources.files("stewart").joinpath("assets")
+        assets_root_path = str(assets_root)
+        p.setAdditionalSearchPath(assets_root_path)
+        robot_urdf = str(assets_root / "robot.urdf")
+        self.robot_id = p.loadURDF(robot_urdf, [0,0,0.1], useFixedBase=True)
 
         self._init_indices()
         self._solver()
