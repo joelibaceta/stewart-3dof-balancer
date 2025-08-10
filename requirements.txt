@@ -3,3 +3,4 @@ numpy>=1.24.0
 matplotlib>=3.5.0
 scipy>=1.10.0
 urdfpy>=0.0.22
+opencv-python>=4.5.0

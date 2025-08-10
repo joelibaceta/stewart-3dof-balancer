@@ -1,7 +1,10 @@
 import pybullet as p, pybullet_data, time, math
+import cv2 as cv
+import numpy as np
 
+ 
 # --- Init ---
-p.connect(p.GUI)
+p.connect(p.DIRECT, options="--opengl2")
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
 p.setGravity(0, 0, -9.81)
 p.loadURDF("plane.urdf")
@@ -11,6 +14,8 @@ robot_id = p.loadURDF("robot.urdf", [0, 0, 0.1], useFixedBase=True)
 
 # --- Helpers ---
 def link_index_by_name(body_id, name):
+    if name == "base_link":
+        return -1
     for i in range(p.getNumJoints(body_id)):
         if p.getJointInfo(body_id, i)[12].decode() == name:
             return i
@@ -33,6 +38,12 @@ def get_link_world_pose(body, link):
     ls = p.getLinkState(body, link, computeForwardKinematics=True)
     return ls[4], ls[5]  # pos, orn
 
+def get_body_or_link_pose(body_id, link_index):
+    if link_index == -1:
+        return p.getBasePositionAndOrientation(body_id)
+    ls = p.getLinkState(body_id, link_index, computeForwardKinematics=True)
+    return ls[4], ls[5]  # pos, orn
+
 def quat_to_axes(q):
     m = p.getMatrixFromQuaternion(q)
     X = [m[0], m[3], m[6]]
@@ -40,8 +51,80 @@ def quat_to_axes(q):
     Z = [m[2], m[5], m[8]]
     return X, Y, Z
 
+# Si aún no lo tienes:
+def get_body_or_link_pose(body_id, link_id):
+    if link_id == -1:
+        return p.getBasePositionAndOrientation(body_id)
+    ls = p.getLinkState(body_id, link_id, computeForwardKinematics=True)
+    return ls[4], ls[5]  # pos, orn
+
+def get_top_cam_rgb(img_w=160, img_h=160, height_above=0.25,
+                    fov=60, near=0.01, far=2.0, mirror=False,
+                    renderer=p.ER_TINY_RENDERER):
+    # Centro geométrico del top (independiente del origin del mesh)
+    aabb_min, aabb_max = p.getAABB(robot_id, top)
+    center = [(aabb_min[i] + aabb_max[i]) * 0.5 for i in range(3)]
+
+    # Usa la orientación del top: Z = normal, Y = "up" de la cámara
+    top_pos, top_orn = get_link_world_pose(robot_id, top)
+    _, Y, Z = quat_to_axes(top_orn)
+
+    # Ojo encima del top a lo largo de su normal
+    eye = [center[0] + Z[0]*height_above,
+           center[1] + Z[1]*height_above,
+           center[2] + Z[2]*height_above]
+    target = center
+    up = Y  # evita roll raro y mantiene encuadre estable
+
+    view = p.computeViewMatrix(eye, target, up)
+    proj = p.computeProjectionMatrixFOV(
+        fov=fov, aspect=float(img_w)/img_h, nearVal=near, farVal=far
+    )
+
+    w, h, rgba, depth, seg = p.getCameraImage(
+        width=img_w, height=img_h,
+        viewMatrix=view, projectionMatrix=proj,
+        renderer=renderer
+    )
+
+    rgba = np.asarray(rgba, np.uint8).reshape(h, w, 4)
+    rgb = rgba[:, :, :3].copy()
+    if mirror:
+        rgb = cv.rotate(rgb, cv.ROTATE_180)
+    return rgb, depth, seg
+
+
+# def get_bottom_cam_rgb(img_w=128, img_h=128, dist_below = 0.06, fov=60, near=0.01, far=1.5):
+#     # Obtener la imagen RGB de la cámara inferior
+#     bpos, born = get_body_or_link_pose(robot_id, bottom)
+#     bx, by, bz = quat_to_axes(born)
+
+#     eye = [bpos[0] - bz[0]*dist_below,
+#            bpos[1] - bz[1]*dist_below,
+#            bpos[2] - bz[2]*dist_below]
+
+#     target = [bpos[0] + bz[0]*0.20,
+#               bpos[1] + bz[1]*0.20,
+#               bpos[2] + bz[2]*0.20]
+
+#     view  = p.computeViewMatrix(eye, target, by)
+#     proj  = p.computeProjectionMatrixFOV(fov=fov, aspect = float(img_w)/img_h, nearVal=near, farVal=far)
+
+#     _w, _h, rgba, depth, seg = p.getCameraImage(
+#         width=img_w, height=img_h, viewMatrix=view, projectionMatrix=proj, renderer=p.ER_TINY_RENDERER
+#     )
+
+#     rgb = np.array(rgba, dtype=np.uint8)[..., :3].copy()
+#     return rgb[:,:,:3], depth, seg
+
+cv.namedWindow("Bottom Camera", cv.WINDOW_NORMAL)
+cv.resizeWindow("Bottom Camera", 320, 320)
+frame_skip = 4
+step = 0
+
 # --- Indices de links usados ---
-top  = link_index_by_name(robot_id, "top")
+top  = link_index_by_name(robot_id, "top") 
+bottom = link_index_by_name(robot_id, "base_link")
 tip2 = link_index_by_name(robot_id, "arm2_tip")
 tip3 = link_index_by_name(robot_id, "arm3_tip")
 
@@ -136,13 +219,22 @@ p.resetDebugVisualizerCamera(0.60, 45, -30, [0,0,0.12])
 
 # --- Loop principal: sliders en los dots ---
 while p.isConnected():
-    a1 = p.readUserDebugParameter(s_dot1)
-    a2 = p.readUserDebugParameter(s_dot2)
-    a3 = p.readUserDebugParameter(s_dot3)
+    step += 1
+    if step % frame_skip == 0:
+        rgb, _, _ = get_top_cam_rgb(img_w=160, img_h=160, renderer=p.ER_TINY_RENDERER)  # o OPENGL si tienes EGL
+        h, w, _ = rgb.shape
+        cv.drawMarker(rgb, (w//2, h//2), (0,255,0), markerType=cv.MARKER_CROSS, markerSize=12, thickness=1)
+        bgr = cv.cvtColor(rgb, cv.COLOR_RGB2BGR)
+        cv.imshow("Bottom Camera", bgr)
+        if cv.waitKey(1) & 0xFF == ord('q'):
+            break
+    #a1 = p.readUserDebugParameter(s_dot1)
+    #a2 = p.readUserDebugParameter(s_dot2)
+    #a3 = p.readUserDebugParameter(s_dot3)
 
-    p.setJointMotorControl2(robot_id, j_dot1, p.POSITION_CONTROL, targetPosition=a1, force=80)
-    p.setJointMotorControl2(robot_id, j_dot2, p.POSITION_CONTROL, targetPosition=a2, force=80)
-    p.setJointMotorControl2(robot_id, j_dot3, p.POSITION_CONTROL, targetPosition=a3, force=80)
+    #p.setJointMotorControl2(robot_id, j_dot1, p.POSITION_CONTROL, targetPosition=a1, force=80)
+    #p.setJointMotorControl2(robot_id, j_dot2, p.POSITION_CONTROL, targetPosition=a2, force=80)
+    #p.setJointMotorControl2(robot_id, j_dot3, p.POSITION_CONTROL, targetPosition=a3, force=80)
 
     p.stepSimulation()
     time.sleep(1/240)
