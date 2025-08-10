@@ -58,12 +58,43 @@ def get_body_or_link_pose(body_id, link_id):
     ls = p.getLinkState(body_id, link_id, computeForwardKinematics=True)
     return ls[4], ls[5]  # pos, orn
 
+def triangle_circumcenter_world():
+    # posiciones de las 3 rótulas (en mundo)
+    a_w = p.getLinkState(robot_id, link_index_by_name(robot_id,"arm1_tip"), True)[4]
+    b_w = p.getLinkState(robot_id, link_index_by_name(robot_id,"arm2_tip"), True)[4]
+    c_w = p.getLinkState(robot_id, link_index_by_name(robot_id,"arm3_tip"), True)[4]
+
+    # pásalas al frame LOCAL del 'top' (2D en su plano)
+    ax, ay, _ = world_to_local(robot_id, top, a_w)
+    bx, by, _ = world_to_local(robot_id, top, b_w)
+    cx, cy, _ = world_to_local(robot_id, top, c_w)
+
+    # circuncentro en 2D (en coords locales del top)
+    d = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by))
+    if abs(d) < 1e-9:
+        ux, uy = (ax+bx+cx)/3.0, (ay+by+cy)/3.0  # fallback: centroide
+    else:
+        ax2ay2 = ax*ax + ay*ay
+        bx2by2 = bx*bx + by*by
+        cx2cy2 = cx*cx + cy*cy
+        ux = (ax2ay2*(by-cy) + bx2by2*(cy-ay) + cx2cy2*(ay-by)) / d
+        uy = (ax2ay2*(cx-bx) + bx2by2*(ax-cx) + cx2cy2*(bx-ax)) / d
+
+    # vuelve a MUNDO: (ux,uy,0) en el frame del top
+    top_pos, top_orn = get_link_world_pose(robot_id, top)
+    X, Y, Z = quat_to_axes(top_orn)
+    center_world = [
+        top_pos[0] + X[0]*ux + Y[0]*uy,
+        top_pos[1] + X[1]*ux + Y[1]*uy,
+        top_pos[2] + X[2]*ux + Y[2]*uy,
+    ]
+    return center_world
+
 def get_top_cam_rgb(img_w=160, img_h=160, height_above=0.25,
                     fov=60, near=0.01, far=2.0, mirror=False,
                     renderer=p.ER_TINY_RENDERER):
-    # Centro geométrico del top (independiente del origin del mesh)
-    aabb_min, aabb_max = p.getAABB(robot_id, top)
-    center = [(aabb_min[i] + aabb_max[i]) * 0.5 for i in range(3)]
+
+    center = triangle_circumcenter_world()
 
     # Usa la orientación del top: Z = normal, Y = "up" de la cámara
     top_pos, top_orn = get_link_world_pose(robot_id, top)
