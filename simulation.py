@@ -27,8 +27,7 @@ top_plate_id = p.createMultiBody(
     basePosition=[0, 0, 0.18]
 )
 
-for i in range(p.getNumJoints(robot_id)):
-    print(i, p.getJointInfo(robot_id, i)[1].decode('utf-8'))
+
 
 # Cámara (opcional)
 p.resetDebugVisualizerCamera(
