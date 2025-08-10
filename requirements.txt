@@ -4,3 +4,5 @@ matplotlib>=3.5.0
 scipy>=1.10.0
 urdfpy>=0.0.22
 opencv-python>=4.5.0
+gymnasium>=0.26.0
+pybullet-gym>=0.1.0
