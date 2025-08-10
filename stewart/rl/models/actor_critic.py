@@ -6,12 +6,28 @@ from .vision import SmallCNN
 class ActorCriticCNN(nn.Module):
     """
     Actor-Critic con acciones continuas (gaussiana diagonal).
-    Mantiene tu interfaz original (action_dim, feature_dim, logstd_init).
+    Acepta obs_shape (opcional) para deducir in_channels y ser compatible con PPO.
     """
-    def __init__(self, action_dim=3, feature_dim=256, logstd_init=-0.5):
+    def __init__(
+        self,
+        action_dim: int = 3,
+        feature_dim: int = 256,
+        logstd_init: float = -0.5,
+        obs_shape=None  # <- NUEVO (compat con PPO)
+    ):
         super().__init__()
-        # SmallCNN ahora es independiente de HxW
-        self.backbone = SmallCNN(in_channels=3, feat_dim=feature_dim)
+
+        # Deducir in_channels de obs_shape si se pasó:
+        # - Soporta (C,H,W) o (H,W,C). Default 3 si no hay obs_shape.
+        in_channels = 3
+        if obs_shape is not None and len(obs_shape) == 3:
+            c0, c1, c2 = obs_shape
+            if c0 in (1, 3):      # (C,H,W)
+                in_channels = int(c0)
+            elif c2 in (1, 3):    # (H,W,C)
+                in_channels = int(c2)
+
+        self.backbone = SmallCNN(in_channels=in_channels, feat_dim=feature_dim)
 
         self.policy = nn.Sequential(
             nn.Linear(feature_dim, 128), nn.ReLU(inplace=True),
