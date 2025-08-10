@@ -90,8 +90,8 @@ def triangle_circumcenter_world():
     ]
     return center_world
 
-def get_top_cam_rgb(img_w=160, img_h=160, height_above=0.25,
-                    fov=60, near=0.01, far=2.0, mirror=False,
+def get_top_cam_rgb(img_w=160, img_h=160, height_above=0.15,
+                    fov=60, near=0.01, far=2.0, mirror=True,
                     renderer=p.ER_TINY_RENDERER):
 
     center = triangle_circumcenter_world()

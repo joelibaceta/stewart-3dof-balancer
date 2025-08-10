@@ -455,7 +455,7 @@
             <mesh filename="meshes/triangle_filled.stl" scale="0.001 0.001 0.001"/>
         </geometry>
         <material name="top_glass">
-            <color rgba="0.6 0.6 0.6 0.15"/>
+            <color rgba="0.0 0.6 0.6 0.15"/>
         </material>
     </visual>
 
