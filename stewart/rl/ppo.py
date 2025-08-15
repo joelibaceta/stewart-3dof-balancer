@@ -70,8 +70,7 @@ class PPO:
 
                 # preparar tensores
                 obs_b = obs_b.float() / 255.0
-                obs_b = obs_b.permute(0,3,1,2).contiguous()  # NHWC->NCHW
-
+                
                 newlog, entropy, values = self.model.evaluate_actions(obs_b, act_b)
                 ratio = (newlog - oldlog_b).exp()
 

@@ -22,9 +22,9 @@ class ActorCriticCNN(nn.Module):
         in_channels = 3
         if obs_shape is not None and len(obs_shape) == 3:
             c0, c1, c2 = obs_shape
-            if c0 in (1, 3):      # (C,H,W)
+            if c0 <= 64:  # aceptamos cualquier número razonable de canales
                 in_channels = int(c0)
-            elif c2 in (1, 3):    # (H,W,C)
+            elif c2 <= 64:  # NHWC
                 in_channels = int(c2)
 
         self.backbone = SmallCNN(in_channels=in_channels, feat_dim=feature_dim)

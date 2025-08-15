@@ -4,7 +4,7 @@ import numpy as np
 
  
 # --- Init ---
-p.connect(p.DIRECT, options="--opengl2")
+p.connect(p.GUI , options="--opengl2")
 p.setAdditionalSearchPath(pybullet_data.getDataPath())
 p.setGravity(0, 0, -9.81)
 p.loadURDF("plane.urdf")
@@ -259,13 +259,13 @@ while p.isConnected():
         cv.imshow("Bottom Camera", bgr)
         if cv.waitKey(1) & 0xFF == ord('q'):
             break
-    #a1 = p.readUserDebugParameter(s_dot1)
-    #a2 = p.readUserDebugParameter(s_dot2)
-    #a3 = p.readUserDebugParameter(s_dot3)
+    a1 = p.readUserDebugParameter(s_dot1)
+    a2 = p.readUserDebugParameter(s_dot2)
+    a3 = p.readUserDebugParameter(s_dot3)
 
-    #p.setJointMotorControl2(robot_id, j_dot1, p.POSITION_CONTROL, targetPosition=a1, force=80)
-    #p.setJointMotorControl2(robot_id, j_dot2, p.POSITION_CONTROL, targetPosition=a2, force=80)
-    #p.setJointMotorControl2(robot_id, j_dot3, p.POSITION_CONTROL, targetPosition=a3, force=80)
+    p.setJointMotorControl2(robot_id, j_dot1, p.POSITION_CONTROL, targetPosition=a1, force=80)
+    p.setJointMotorControl2(robot_id, j_dot2, p.POSITION_CONTROL, targetPosition=a2, force=80)
+    p.setJointMotorControl2(robot_id, j_dot3, p.POSITION_CONTROL, targetPosition=a3, force=80)
 
     p.stepSimulation()
     time.sleep(1/240)

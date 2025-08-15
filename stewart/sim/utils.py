@@ -17,6 +17,20 @@ def joint_index_by_name(body_id: int, name: str) -> int:
             return i
     raise RuntimeError(f"joint not found: {name}")
 
+def joint_limits(body_id: int, joint_indices) -> list[tuple[float,float]]:
+    """
+    Devuelve [(lo, hi), ...] para cada joint. Si el URDF no define,
+    retorna (-1e9, +1e9).
+    """
+    L = []
+    for j in joint_indices:
+        ji = p.getJointInfo(body_id, j)
+        lo, hi = float(ji[8]), float(ji[9])
+        if not np.isfinite(lo) or not np.isfinite(hi) or lo >= hi:
+            lo, hi = -1e9, 1e9
+        L.append((lo, hi))
+    return L
+
 # ---------- frames y geometría ----------
 def axes_from_quat(q):
     m = p.getMatrixFromQuaternion(q)
@@ -30,20 +44,70 @@ def to_local_xy(top_pos, top_orn, world_pt):
     (x, y, _), _ = p.multiplyTransforms(inv_pos, inv_orn, world_pt, [0,0,0,1])
     return float(x), float(y)
 
+def circumcenter_xy(A, B, C):
+    ax, ay = A; bx, by = B; cx, cy = C
+    d = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by))
+    if abs(d) < 1e-12:
+        # fallback: baricentro
+        return (ax+bx+cx)/3.0, (ay+by+cy)/3.0
+    ax2 = ax*ax + ay*ay; bx2 = bx*bx + by*by; cx2 = cx*cx + cy*cy
+    ux = (ax2*(by-cy) + bx2*(cy-ay) + cx2*(ay-by)) / d
+    uy = (ax2*(cx-bx) + bx2*(ax-cx) + cx2*(bx-ax)) / d
+    return float(ux), float(uy)
+
 def triangle_incenter(A, B, C):
     A = np.asarray(A); B = np.asarray(B); C = np.asarray(C)
-    a = np.linalg.norm(B - C)  # lado opuesto a A
-    b = np.linalg.norm(C - A)  # opuesto a B
-    c = np.linalg.norm(A - B)  # opuesto a C
+    a = np.linalg.norm(B - C)
+    b = np.linalg.norm(C - A)
+    c = np.linalg.norm(A - B)
     P = a + b + c + 1e-12
     I = (a*A + b*B + c*C) / P
     return I
 
 def shrink_triangle_towards(A, B, C, center, t: float):
     t = float(np.clip(t, 0.0, 0.49))
-    A2 = (1.0 - t) * A + t * center
-    B2 = (1.0 - t) * B + t * center
-    C2 = (1.0 - t) * C + t * center
+    A2 = (1.0 - t) * np.asarray(A) + t * np.asarray(center)
+    B2 = (1.0 - t) * np.asarray(B) + t * np.asarray(center)
+    C2 = (1.0 - t) * np.asarray(C) + t * np.asarray(center)
+    return A2, B2, C2
+
+def offset_triangle_metric(A, B, C, margin_m: float):
+    """
+    Offset hacia adentro una distancia métrica (en las coords XY locales).
+    """
+    A = np.asarray(A); B = np.asarray(B); C = np.asarray(C)
+    centroid = (A + B + C) / 3.0
+
+    def edge_offset(P, Q, m):
+        e = Q - P
+        n = np.array([-e[1], e[0]], dtype=np.float64)
+        n /= (np.linalg.norm(n) + 1e-12)
+        if np.dot(n, centroid - P) < 0:
+            n = -n
+        d = float(np.dot(n, P) + m)  # n·x = d
+        return n, d
+
+    n1, d1 = edge_offset(B, C, margin_m)
+    n2, d2 = edge_offset(C, A, margin_m)
+    n3, d3 = edge_offset(A, B, margin_m)
+
+    def intersect(nu, du, nv, dv):
+        M = np.stack([nu, nv], axis=0)
+        b = np.array([du, dv], dtype=np.float64)
+        det = np.linalg.det(M)
+        if abs(det) < 1e-12:
+            return centroid.copy()
+        return np.linalg.solve(M, b)
+
+    A2 = intersect(n1, d1, n2, d2)
+    B2 = intersect(n2, d2, n3, d3)
+    C2 = intersect(n3, d3, n1, d1)
+
+    area = 0.5 * abs(A2[0]*(B2[1]-C2[1]) + B2[0]*(C2[1]-A2[1]) + C2[0]*(A2[1]-B2[1]))
+    if area < 1e-10:
+        # fallback a incenter con shrink
+        I = triangle_incenter(A, B, C)
+        A2, B2, C2 = shrink_triangle_towards(A, B, C, I, 0.3)
     return A2, B2, C2
 
 def sample_uniform_triangle(rng, A, B, C):
@@ -55,16 +119,12 @@ def sample_uniform_triangle(rng, A, B, C):
     return float(P[0]), float(P[1])
 
 # ---------- cámara / imagen ----------
-# stewart/sim/utils.py
-import numpy as np
-import pybullet as p
-from .utils import to_local_xy, axes_from_quat  # si ya están en utils; si no, copia sus defs aquí
-
 def camera_view_proj(robot_id, top_link, img_w, img_h, fov=60, near=0.01, far=2.0):
     # estado del top
-    top_pos, top_orn = p.getLinkState(robot_id, top_link, True)[4], p.getLinkState(robot_id, top_link, True)[5]
+    ls = p.getLinkState(robot_id, top_link, True)
+    top_pos, top_orn = ls[4], ls[5]
 
-    # busca tips
+    # links de los tips
     tips = []
     for name in ("arm1_tip", "arm2_tip", "arm3_tip"):
         for i in range(p.getNumJoints(robot_id)):
@@ -77,15 +137,8 @@ def camera_view_proj(robot_id, top_link, img_w, img_h, fov=60, near=0.01, far=2.
     B = np.array(to_local_xy(top_pos, top_orn, tips[1]))
     C = np.array(to_local_xy(top_pos, top_orn, tips[2]))
 
-    # circuncentro en local
-    ax, ay = A; bx, by = B; cx, cy = C
-    d = 2 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by))
-    if abs(d) < 1e-12:
-        ux, uy = (ax+bx+cx)/3, (ay+by+cy)/3
-    else:
-        ax2=ax*ax+ay*ay; bx2=bx*bx+by*by; cx2=cx*cx+cy*cy
-        ux = (ax2*(by-cy) + bx2*(cy-ay) + cx2*(ay-by)) / d
-        uy = (ax2*(cx-bx) + bx2*(ax-cx) + cx2*(bx-ax)) / d
+    # centro del triángulo (circuncentro)
+    ux, uy = circumcenter_xy(A, B, C)
 
     X, Y, Z = axes_from_quat(top_orn)
     center = (top_pos[0] + X[0]*ux + Y[0]*uy,
@@ -99,14 +152,23 @@ def camera_view_proj(robot_id, top_link, img_w, img_h, fov=60, near=0.01, far=2.
     proj = p.computeProjectionMatrixFOV(fov, 1.0, near, far)
     return view, proj, center, eye, Y
 
-def get_rgb_and_seg(img_w, img_h, view, proj):
+def get_rgb_and_seg(img_w, img_h, view, proj, rotate180=True, renderer=p.ER_TINY_RENDERER):
     w, h, rgba, depth, seg = p.getCameraImage(
-        img_w, img_h, viewMatrix=view, projectionMatrix=proj,
-        renderer=p.ER_TINY_RENDERER,
+        img_w, img_h,
+        viewMatrix=view,
+        projectionMatrix=proj,
+        renderer=renderer,
         flags=p.ER_SEGMENTATION_MASK_OBJECT_AND_LINKINDEX
     )
-    rgb = np.asarray(rgba, np.uint8).reshape(h, w, 4)[:, :, :3]
-    rgb = np.ascontiguousarray(np.rot90(rgb, 2))
-    seg = np.asarray(seg, np.int32)
-    seg = np.ascontiguousarray(np.rot90(seg, 2))
+
+    # RGB: (h, w, 4) -> (h, w, 3)
+    rgb = np.asarray(rgba, dtype=np.uint8).reshape(h, w, 4)[..., :3]
+
+    # Seg: garantizar (h, w)
+    seg = np.asarray(seg, dtype=np.int32).reshape(h, w)
+
+    if rotate180:
+        rgb = np.ascontiguousarray(np.rot90(rgb, 2))
+        seg = np.ascontiguousarray(np.rot90(seg,  2))
+
     return rgb, seg
