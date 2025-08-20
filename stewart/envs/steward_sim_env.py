@@ -6,16 +6,12 @@ import numpy as np
 from stewart.sim.core import StewartSimCore
 from gymnasium.wrappers import FrameStackObservation
 from stewart.envs.to_chw import ToCHW
+from stewart.envs.reset_delay import ResetDelayWrapper
 
-def _barycentric(P, A, B, C):
-    (x,y),(x1,y1),(x2,y2),(x3,y3) = P,A,B,C
-    denom = (y2 - y3)*(x1 - x3) + (x3 - x2)*(y1 - y3)
-    if abs(denom) < 1e-12:
-        return -1.0, -1.0, -1.0
-    u = ((y2 - y3)*(x - x3) + (x3 - x2)*(y - y3)) / denom
-    v = ((y3 - y1)*(x - x3) + (x1 - x3)*(y - y3)) / denom
-    w = 1.0 - u - v
-    return u, v, w
+from stewart.utils.geometry import barycentric, distance_to_triangle_edges
+from stewart.utils.segmentation import decode_seg
+
+
 
 class StewartBalanceEnv(gym.Env):
     """
@@ -37,12 +33,13 @@ class StewartBalanceEnv(gym.Env):
         img_size=84,
         use_gui=False,
         reward_mode: str = "image",
-        action_scale: float = 0.35,
-        k_in: float = 0.1,
-        k_out: float = 0.2,
+        action_scale: float = 0.1,
+        k_in: float = 0.05,
+        k_out: float = 0.1,
         k_center: float = 1.0,
+        k_delta_a: float = 0.01,
         max_steps: int = 1000,
-        spawn_margin_frac: float = 0.2,
+        spawn_margin_frac: float = 0.3,
         # ---- cámara/GUI -> Core ----
         cam_mode: str = "fixed",
         cam_eye_world=(0.0, 0.0, 0.28),
@@ -56,7 +53,7 @@ class StewartBalanceEnv(gym.Env):
         # ---- terminación local ----
         terminate_on_leave: bool = True,
         out_patience: int = 8,
-        z_drop_local: float = -0.01,   # ~1 cm por debajo del plano del top
+        z_drop_local: float = -0.01,   
         render_camera: bool = False,
     ):
         super().__init__()
@@ -85,6 +82,8 @@ class StewartBalanceEnv(gym.Env):
         self.render_camera = bool(render_camera)
         self._rmax_local = 1.0
 
+        self.k_delta_a = float(k_delta_a)
+
         # terminación
         self.terminate_on_leave = bool(terminate_on_leave)
         self.out_patience = int(out_patience)
@@ -109,6 +108,7 @@ class StewartBalanceEnv(gym.Env):
             render_camera=True,
         )
         env = FrameStackObservation(env, stack_size=4)
+        #env = ResetDelayWrapper(env, steps=2)
         env = ToCHW(env)
         return env
 
@@ -181,7 +181,7 @@ class StewartBalanceEnv(gym.Env):
         self._prev_action  = a
 
         # ------ reward ------
-        reward, info_extra = self._reward_image()
+        reward, info_extra = self.reward()
         inside = bool(info_extra.get("inside_top", False))
 
         # --- terminaciones (local top) ---
@@ -223,113 +223,74 @@ class StewartBalanceEnv(gym.Env):
         except Exception:
             pass
         self.core.close()
-
-    # # -------------- Reward geométrico --------------
-    # def _reward_geom(self):
-    #     A, B, C = self.core.get_top_triangle_xy()
-    #     cx, cy = self.core.circumcenter_local_xy()
-    #     bx, by = self.core.get_ball_local_xy()
-
-    #     u, v, w = _barycentric((bx, by), A, B, C)
-    #     inside = (u >= 0.0) and (v >= 0.0) and (w >= 0.0)
-
-    #     cxcy = np.array([cx, cy], dtype=np.float64)
-    #     rmax = max(
-    #         np.linalg.norm(np.array(A) - cxcy),
-    #         np.linalg.norm(np.array(B) - cxcy),
-    #         np.linalg.norm(np.array(C) - cxcy),
-    #     ) + 1e-8
-    #     r = np.linalg.norm(np.array([bx, by]) - cxcy)
-    #     center_score = 1.0 - min(r / rmax, 1.0)
-
-    #     # ------------------------------
-    #     # Reward principal
-    #     reward = (self.k_in if inside else -self.k_out) + self.k_center * center_score
-
-    #     # Bonus por sobrevivir
-    #     survive_bonus = 0.001  # o el valor que quieras
-    #     reward += survive_bonus
-
-    #     # ------------------------------
-    #     return reward, {
-    #         "inside_top": bool(inside),
-    #         "center_score": float(center_score),
-    #         "center_local": np.array([cx, cy], np.float32),
-    #         "ball_local": np.array([bx, by], np.float32),
-    #     }
     
-    def _decode_seg(self, seg: np.ndarray):
-        # int32 (no uint32) para que el -1 del fondo se mantenga en -1
-        raw = seg.astype(np.int32)
-        obj_id   = raw >> 24
-        link_plus = raw & ((1 << 24) - 1)  # [0 .. (1<<24)-1]
-        link_idx = link_plus - 1           # ahora sí: -1=base, 0..N-1=links reales
-        return obj_id, link_idx
+
+    def reward(self):
+        ball_pos = np.array(self.core.get_ball_local_xy(), dtype=np.float64)
+        center_pos = np.array(self.core.circumcenter_local_xy(), dtype=np.float64)
+        dist_center = np.linalg.norm(ball_pos - center_pos)
+
+        # Recompensa por cercanía al centro (shaping)
+        rmax_geom = max(np.linalg.norm(np.array(v) - center_pos) for v in self.core.get_top_triangle_xy()) + 1e-8
+        
+        # Esta función premia la cercanía de forma suave y continua
+        center_reward = self.k_center * (1.0 - min(dist_center / rmax_geom, 1.0))
+
+        # Recompensa por estar dentro del triángulo (o penalización)
+        inside = self._is_ball_inside_top(ball_pos)
+        if inside:
+            inside_reward = self.k_in
+        else:
+            inside_reward = -self.k_out
+
+        # Penalización por cambios bruscos
+        delta_a_penalty = -self.k_delta_a * self._last_delta_a
+
+        # Recompensa por sobrevivir (constante)
+        survival_reward = 0.001
+
+        # Recompensa total
+        total_reward = center_reward + inside_reward + delta_a_penalty + survival_reward
+
+
+        return total_reward, {
+            "inside_top": bool(inside),
+            "center_score": float(center_reward),
+            "center_local": center_pos.astype(np.float32),
+            "ball_local": ball_pos.astype(np.float32),
+            "delta_a": float(self._last_delta_a),
+            "dist_center": float(dist_center),
+        }
     
-    def _distance_to_triangle_edges(self, P, A, B, C):
-        def point_line_distance(P, Q, R):  # Distancia de P a línea QR
-            PQ = np.array(P) - np.array(Q)
-            QR = np.array(R) - np.array(Q)
-            proj_len = np.dot(PQ, QR) / (np.linalg.norm(QR)**2 + 1e-8)
-            proj_len = np.clip(proj_len, 0.0, 1.0)
-            closest = np.array(Q) + proj_len * QR
-            return np.linalg.norm(np.array(P) - closest)
-
-        return min(
-            point_line_distance(P, A, B),
-            point_line_distance(P, B, C),
-            point_line_distance(P, C, A),
-        )
-
-    # -------------- Reward por imagen --------------
-    def _reward_image(self):
+    def _get_top_visual_data(self):
         rgb, seg = self.core.get_rgb_and_seg()
-        obj_id, link_idx = self._decode_seg(seg)
+        obj_id, link_idx = decode_seg(seg)
 
         robot_id = self.core.robot_id
         top_link = self.core.top
 
-        # --- Máscara del top (segmentación de la plataforma) ---
+        # Máscara del top en imagen
         top_mask = (obj_id == robot_id) & (link_idx == top_link)
         if not np.any(top_mask) and (robot_id in np.unique(obj_id)):
             top_mask = (obj_id == robot_id)
 
-        # --- Centro visual del top (en imagen) ---
+        # Centro visual del top (si existe máscara)
         if np.any(top_mask):
             ys, xs = np.where(top_mask)
-            cx_img = xs.mean()
-            cy_img = ys.mean()
-            rmax_px = np.sqrt(((xs - cx_img)**2 + (ys - cy_img)**2).max()) + 1e-8
+            cx = xs.mean()
+            cy = ys.mean()
+            rmax = np.sqrt(((xs - cx) ** 2 + (ys - cy) ** 2).max()) + 1e-8
         else:
             h, w = seg.shape
-            cx_img, cy_img = w / 2, h / 2
-            rmax_px = max(w, h) / 2.0
+            cx, cy = w / 2, h / 2
+            rmax = max(w, h) / 2.0
 
-        # --- Posición de la bola en coordenadas locales ---
-        bx, by = self.core.get_ball_local_xy()
-        cx, cy = self.core.circumcenter_local_xy()
+        return top_mask, (cx, cy), rmax
 
-        r = np.linalg.norm(np.array([bx, by]) - np.array([cx, cy]))
-        rmax_geom = max(
-            np.linalg.norm(np.array(A) - np.array([cx, cy]))
-            for A in self.core.get_top_triangle_xy()
-        ) + 1e-8
-        center_score = 1.0 - min(r / rmax_geom, 1.0)
-
-        # --- Verificar si el centro de la bola + radio ya están fuera ---
-        # Considera que la bola puede estar parcialmente fuera.
-        ball_radius = getattr(self.core, "ball_radius", 0.013)  # 26mm / 2, default si no está definido
+    def _is_ball_inside_top(self, ball_pos):
         A, B, C = self.core.get_top_triangle_xy()
-        u, v, w = _barycentric((bx, by), A, B, C)
-        margin = 0.5 * ball_radius  # margen para decir "está saliendo"
-        inside = (u >= -margin) and (v >= -margin) and (w >= -margin)
+        u, v, w = barycentric(ball_pos, A, B, C)
 
-        reward = (self.k_in if inside else -self.k_out) + self.k_center * center_score
-        reward += 0.001  # sobrevivencia
-
-        return reward, {
-            "inside_top": bool(inside),
-            "center_score": float(center_score),
-            "center_local": np.array([cx, cy], np.float32),
-            "ball_local": np.array([bx, by], np.float32),
-        }
+        ball_radius = getattr(self.core, "ball_radius", 0.013)
+        margin = 0.5 * ball_radius
+        return (u >= -margin) and (v >= -margin) and (w >= -margin)

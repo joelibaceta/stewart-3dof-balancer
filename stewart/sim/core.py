@@ -163,7 +163,7 @@ class StewartSimCore:
             aabb_min, aabb_max = p.getAABB(self.robot_id, self.top)
             center = [(aabb_min[i] + aabb_max[i]) * 0.5 for i in range(3)]
             _,orn = self._pose(self.top); Z = axes_from_quat(orn)[2]
-            lift = self.ball_r + 0.01
+            lift = self.ball_r + 0.05
             pos = [center[0]+Z[0]*lift, center[1]+Z[1]*lift, center[2]+Z[2]*lift]
 
         self.ball_id = p.createMultiBody(self.ball_m, col, vis, basePosition=pos)
@@ -171,8 +171,8 @@ class StewartSimCore:
         # Menos rebote, más fricción y algo de damping
         p.changeDynamics(self.ball_id, -1,
             mass=0.018,  # ~18 gramos, puedes ajustar según comportamiento
-            restitution=0.05,            # rebote alto, típico del vidrio
-            lateralFriction=0.1,         # superficie lisa
+            restitution=0.001,            # rebote alto, típico del vidrio
+            lateralFriction=0.15,         # superficie lisa
             rollingFriction=0.0001,      # mínimo para que ruede libremente
             spinningFriction=0.0001,     # casi sin resistencia al giro
             linearDamping=0.001,         # muy poca resistencia al movimiento lineal
@@ -264,7 +264,7 @@ class StewartSimCore:
         else:
             # Aleatorio PERO con margen MÉTRICO seguro
             safe_m = (spawn_margin_m if spawn_margin_m is not None
-                    else (self.ball_r + 0.020 if margin_m is None else float(margin_m)))
+                    else (self.ball_r + 0.035 if margin_m is None else float(margin_m)))
             pos = self.sample_point_on_top(margin_m=safe_m)
             self._spawn_ball(pos=pos)
 

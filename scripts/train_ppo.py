@@ -23,7 +23,7 @@ def set_global_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 def main(
-    total_steps=200_000,
+    total_steps=500_000,
     n_steps=1024,
     img_size=84,
     seed=42,
