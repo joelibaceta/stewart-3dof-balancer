@@ -2,8 +2,8 @@ import torch
 import numpy as np
 import time
 import argparse
-from stewart.envs.steward_sim_env import StewartBalanceEnv
-from stewart.rl.models.actor_critic import ActorCriticCNN
+from stewart.envs.stewart_env import StewartBalanceEnv
+from stewart.models.actor_critic_cnn import ActorCriticCNN
 
 def evaluate(model_path, episodes=5, img_size=84, device="cuda" if torch.cuda.is_available() else "cpu"):
     env = StewartBalanceEnv.make(img_size=img_size, use_gui=True)

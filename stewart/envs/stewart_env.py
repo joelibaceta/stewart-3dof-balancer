@@ -5,36 +5,45 @@ import numpy as np
 
 from stewart.sim.core import StewartSimCore
 from gymnasium.wrappers import FrameStackObservation
-from stewart.envs.to_chw import ToCHW
-from stewart.envs.reset_delay import ResetDelayWrapper
+from stewart.envs.wrappers.to_chw import ToCHW
+from stewart.envs.wrappers.reset_delay import ResetDelayWrapper
 
 from stewart.utils.geometry import barycentric, distance_to_triangle_edges
 from stewart.utils.segmentation import decode_seg
-
+from stewart.utils.geometry import circumcenter_local_xy
 
 
 class StewartBalanceEnv(gym.Env):
     """
-    Obs: RGB uint8 (H,W,3)
-    Act: Box(-1,1)^3 -> se escala por action_scale (rad)
-    Reward (geom por defecto):
-      + k_in si la bola está dentro del triángulo (local top)
-      + k_center * (1 - dist_centro / radio_max)
-      - k_out si está fuera
-    Termination:
-      - z_local de la bola por debajo de z_drop_local
-      - fuera del triángulo por out_patience steps (si terminate_on_leave=True)
-      - o por max_steps (truncation)
+    StewartBalanceEnv: entorno de simulación de balanceo sobre plataforma Stewart.
+
+    Observación:
+        - RGB uint8 (H, W, 3) imagen de cámara montada fija.
+
+    Acción:
+        - Box(-1, 1)^3: comandos para los 3 servos, escalados por `action_scale` en radianes.
+
+    Reward (modo "geom"):
+        - +k_in si la bola está dentro del triángulo del top.
+        - +k_center * score: shaping proporcional a cercanía al centro.
+        - -k_out si está fuera.
+        - -k_delta_a * delta: penaliza cambios bruscos de acción.
+        - +0.001 por sobrevivir (incentivo temporal pequeño).
+
+    Terminación:
+        - Si z_local de la bola cae por debajo de `z_drop_local`.
+        - Si está fuera del triángulo por `out_patience` pasos consecutivos.
+        - Si se alcanza `max_steps` (truncation).
     """
-    metadata = {"render_modes": ["rgb_array"], "render_fps": 60}
+
+    metadata = {"render_modes": ["rgb_array"], "render_fps": 30}
 
     def __init__(
         self,
         img_size=84,
         use_gui=False,
-        reward_mode: str = "image",
-        action_scale: float = 0.1,
-        k_in: float = 0.05,
+        action_scale: float = 0.5,
+        k_in: float = 0.1,
         k_out: float = 0.1,
         k_center: float = 1.0,
         k_delta_a: float = 0.01,
@@ -53,7 +62,7 @@ class StewartBalanceEnv(gym.Env):
         # ---- terminación local ----
         terminate_on_leave: bool = True,
         out_patience: int = 8,
-        z_drop_local: float = -0.01,   
+        z_drop_local: float = -0.01,
         render_camera: bool = False,
     ):
         super().__init__()
@@ -73,9 +82,12 @@ class StewartBalanceEnv(gym.Env):
         )
 
         self.img_size = int(img_size)
-        self.reward_mode = reward_mode.lower().strip()
         self.action_scale = float(action_scale)
-        self.k_in, self.k_out, self.k_center = float(k_in), float(k_out), float(k_center)
+        self.k_in, self.k_out, self.k_center = (
+            float(k_in),
+            float(k_out),
+            float(k_center),
+        )
         self.max_steps = int(max_steps)
         self.spawn_margin_frac = float(spawn_margin_frac)
 
@@ -91,16 +103,17 @@ class StewartBalanceEnv(gym.Env):
         self._outside_count = 0
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
-        self.observation_space = spaces.Box(0, 255, shape=(self.img_size, self.img_size, 3), dtype=np.uint8)
+        self.observation_space = spaces.Box(
+            0, 255, shape=(self.img_size, self.img_size, 3), dtype=np.uint8
+        )
 
         self.step_count = 0
 
     @classmethod
-    def make(cls, img_size=84, use_gui=False, reward_mode="image"):
+    def make(cls, img_size=84, use_gui=False):
         env = cls(
             img_size=img_size,
             use_gui=use_gui,
-            reward_mode=reward_mode,
             cam_mode="fixed",
             cam_eye_world=(0.0, 0.0, 0.32),
             cam_center_world=(0.0, 0.0, 0.10),
@@ -108,12 +121,17 @@ class StewartBalanceEnv(gym.Env):
             render_camera=True,
         )
         env = FrameStackObservation(env, stack_size=4)
-        #env = ResetDelayWrapper(env, steps=2)
+        # env = ResetDelayWrapper(env, steps=2)
         env = ToCHW(env)
         return env
 
-    # -------------- Gym API --------------
     def reset(self, *, seed=None, options=None):
+        """
+        Reinicia el entorno, incluyendo:
+        - Posición de la bola (aleatoria o fijada).
+        - Reset de estados previos para reward (posición, acción).
+        - Cálculo del radio máximo del top en el espacio local.
+        """
         super().reset(seed=seed)
         self.step_count = 0
         self._outside_count = 0
@@ -125,8 +143,11 @@ class StewartBalanceEnv(gym.Env):
                 init = options["init_joint_rad"]
             elif "init_joint_deg" in options and options["init_joint_deg"] is not None:
                 v = options["init_joint_deg"]
-                init = float(np.deg2rad(v)) if isinstance(v, (int, float)) \
+                init = (
+                    float(np.deg2rad(v))
+                    if isinstance(v, (int, float))
                     else np.deg2rad(np.asarray(v, dtype=np.float32))
+                )
         if init is None:
             init = getattr(self, "init_joint_rad", None)
 
@@ -136,79 +157,108 @@ class StewartBalanceEnv(gym.Env):
 
         # --------- estado para reward ----------
         # rmax fijo (geom) a partir del triángulo del top
-        A, B, C = self.core.get_top_triangle_xy()
-        cx, cy = self.core.circumcenter_local_xy()
+        A, B, C, _, _ = self.core._get_top_vertices_xy()
+        cx, cy = circumcenter_local_xy(A, B, C)
         cxcy = np.array([cx, cy], dtype=np.float64)
-        self._rmax_local = max(
-            np.linalg.norm(np.array(A) - cxcy),
-            np.linalg.norm(np.array(B) - cxcy),
-            np.linalg.norm(np.array(C) - cxcy),
-        ) + 1e-8
+        self._rmax_local = (
+            max(
+                np.linalg.norm(np.array(A) - cxcy),
+                np.linalg.norm(np.array(B) - cxcy),
+                np.linalg.norm(np.array(C) - cxcy),
+            )
+            + 1e-8
+        )
 
         # velocidad de bola y suavidad de acción: estado previo
         bx, by = self.core.get_ball_local_xy()
         self._prev_ball_xy = np.array([bx, by], dtype=np.float64)
-        self._prev_action  = np.zeros(3, dtype=np.float32)
+        self._prev_action = np.zeros(3, dtype=np.float32)
         # dt del paso del env (~ 4 substeps a 1 kHz)
         self._dt_env = getattr(self, "_dt_env", 4e-3)
 
         self._last_ball_speed = 0.0
-        self._last_delta_a    = 0.0
+        self._last_delta_a = 0.0
 
         return obs, {}
 
     def step(self, action):
+        """
+        Ejecuta un paso del entorno de simulación.
+
+        Este método aplica la acción proporcionada al robot, avanza la simulación,
+        calcula métricas internas (como velocidad de la bola y suavidad de movimiento),
+        evalúa si el episodio ha terminado, y retorna la observación visual junto al reward,
+        flags de finalización y un diccionario de información adicional.
+        """
+
         self.step_count += 1
 
-        # acción escalada (en rad)
+        # --- Escalado de acción ---
+        # Se limita la acción al rango [-1, 1] y se escala por action_scale (en radianes)
+        # para enviar valores físicamente válidos a los actuadores.
         a = np.clip(action, -1, 1).astype(np.float32) * self.action_scale
 
-        # sim step
+        # --- Avanzar simulación ---
+        # Se aplica la acción escalada en el simulador de la plataforma.
         self.core.step(a)
 
-        # obs
+        # --- Obtener observación ---
+        # Se recupera la imagen RGB desde la cámara del entorno.
         obs = self.core.get_rgb()
 
-        # ------ métricas para reward (suavidad/velocidad) ------
+        # --- Cálculo de métricas internas para reward ---
+        # Se calcula la posición local de la bola (plano XY)
         bx, by = self.core.get_ball_local_xy()
         ball_xy = np.array([bx, by], dtype=np.float64)
+
+        # Velocidad de la bola = distancia entre frames dividido por el tiempo
         self._last_ball_speed = float(
-            np.linalg.norm(ball_xy - self._prev_ball_xy) / (self._dt_env if self._dt_env > 0 else 1e-3)
+            np.linalg.norm(ball_xy - self._prev_ball_xy) /
+            (self._dt_env if self._dt_env > 0 else 1e-3)
         )
+
+        # Suavidad del movimiento = magnitud del cambio en la acción
         self._last_delta_a = float(np.linalg.norm(a - self._prev_action))
-        # actualizar estado previo
+
+        # Guardar estado para el siguiente paso
         self._prev_ball_xy = ball_xy
-        self._prev_action  = a
+        self._prev_action = a
 
-        # ------ reward ------
+        # --- Cálculo del reward ---
         reward, info_extra = self.reward()
-        inside = bool(info_extra.get("inside_top", False))
+        inside = bool(info_extra.get("inside_top", False))  # ¿La bola está dentro del área objetivo?
 
-        # --- terminaciones (local top) ---
-        _, _, z_loc = self.core.get_ball_local_xyz()
-        fell_below = (z_loc < self.z_drop_local)
+        # --- Condiciones de terminación ---
+        _, _, z_loc = self.core.get_ball_local_xyz()  # Coordenada Z local de la bola
+        fell_below = z_loc < self.z_drop_local        # ¿La bola cayó por debajo del umbral?
 
+        # Condición adicional: ¿salió del área objetivo por mucho tiempo?
         if self.terminate_on_leave:
             self._outside_count = 0 if inside else (self._outside_count + 1)
-            left_for_too_long = (self._outside_count >= self.out_patience)
+            left_for_too_long = self._outside_count >= self.out_patience
         else:
             left_for_too_long = False
 
+        # El episodio termina si la bola cae o sale del área por mucho tiempo
         terminated = bool(fell_below or left_for_too_long)
-        truncated  = bool(self.step_count >= self.max_steps)
 
+        # O se trunca si se alcanza el máximo número de pasos
+        truncated = bool(self.step_count >= self.max_steps)
+
+        # --- Información adicional para debugging o métricas ---
         info = {
-            "ball_world": self.core.get_dense_state()["ball_world"],
+            "ball_world": self.core.get_dense_state()["ball_world"],  # Posición en el mundo
             "z_local": float(z_loc),
             "outside_streak": int(self._outside_count),
-            "joint_angles_rad": self.core.get_joint_angles_rad(),
-            **info_extra,
+            "joint_angles_rad": self.core.get_joint_angles_rad(),     # Posiciones articulares actuales
+            **info_extra,  # Métricas calculadas en la función de reward
         }
 
+        # --- Renderizado opcional en ventana emergente ---
         if self.render_camera:
             import cv2
             bgr = cv2.cvtColor(obs, cv2.COLOR_RGB2BGR)
-            cv2.imshow("Camera View", bgr)  # (puedes escalar si quieres)
+            cv2.imshow("Camera View", bgr)
             cv2.waitKey(1)
 
         return obs, float(reward), terminated, truncated, info
@@ -219,20 +269,40 @@ class StewartBalanceEnv(gym.Env):
     def close(self):
         try:
             import cv2
+
             cv2.destroyAllWindows()
         except Exception:
             pass
         self.core.close()
-    
 
     def reward(self):
+        """
+        Cálculo del reward total por paso:
+
+        Componentes:
+        - `center_reward`: shaping que premia la cercanía al centro (lineal).
+        - `inside_reward`: bonus si está dentro del triángulo, penalización si está fuera.
+        - `delta_a_penalty`: penalización por cambios bruscos de acción.
+        - `survival_reward`: pequeña recompensa constante por cada paso no terminado.
+
+        Retorna:
+            reward_total: float
+            info: dict con métricas útiles para debug/log
+        """
+        A, B, C, _, _ = self.core._get_top_vertices_xy()
         ball_pos = np.array(self.core.get_ball_local_xy(), dtype=np.float64)
-        center_pos = np.array(self.core.circumcenter_local_xy(), dtype=np.float64)
+        center_pos = np.array(circumcenter_local_xy(A, B, C), dtype=np.float64)
         dist_center = np.linalg.norm(ball_pos - center_pos)
 
         # Recompensa por cercanía al centro (shaping)
-        rmax_geom = max(np.linalg.norm(np.array(v) - center_pos) for v in self.core.get_top_triangle_xy()) + 1e-8
-        
+        rmax_geom = (
+            max(
+                np.linalg.norm(np.array(v) - center_pos)
+                for v in self.core.get_top_triangle_xy()
+            )
+            + 1e-8
+        )
+
         # Esta función premia la cercanía de forma suave y continua
         center_reward = self.k_center * (1.0 - min(dist_center / rmax_geom, 1.0))
 
@@ -252,7 +322,6 @@ class StewartBalanceEnv(gym.Env):
         # Recompensa total
         total_reward = center_reward + inside_reward + delta_a_penalty + survival_reward
 
-
         return total_reward, {
             "inside_top": bool(inside),
             "center_score": float(center_reward),
@@ -262,6 +331,8 @@ class StewartBalanceEnv(gym.Env):
             "dist_center": float(dist_center),
         }
     
+    ## Helpers
+
     def _get_top_visual_data(self):
         rgb, seg = self.core.get_rgb_and_seg()
         obj_id, link_idx = decode_seg(seg)
@@ -272,7 +343,7 @@ class StewartBalanceEnv(gym.Env):
         # Máscara del top en imagen
         top_mask = (obj_id == robot_id) & (link_idx == top_link)
         if not np.any(top_mask) and (robot_id in np.unique(obj_id)):
-            top_mask = (obj_id == robot_id)
+            top_mask = obj_id == robot_id
 
         # Centro visual del top (si existe máscara)
         if np.any(top_mask):

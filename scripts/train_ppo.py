@@ -1,14 +1,31 @@
-# scripts/train_ppo.py
+"""
+Entrenamiento PPO para StewartBalanceEnv usando imágenes RGB como observación.
+
+Este script entrena un agente PPO para balancear una bola sobre una plataforma
+tipo Stewart. Utiliza observaciones visuales (84x84 RGB) y una política 
+actor-crítico convolucional (CNN). Los resultados se loguean en TensorBoard.
+
+Requisitos:
+- entornos Gymnasium personalizados (`StewartBalanceEnv`)
+- PPO con GAE y clipping
+- Imagenes en CHW (usando wrapper `ToCHW`)
+- Rollout buffer externo
+"""
+
+import random
 import os, json, time, numpy as np, torch
 from torch.utils.tensorboard import SummaryWriter
 
-from stewart.envs.steward_sim_env import StewartBalanceEnv
-from stewart.rl.storage import RolloutBuffer
-from stewart.rl.models.actor_critic import ActorCriticCNN
-from stewart.rl.ppo import PPO
+from stewart.envs.stewart_env import StewartBalanceEnv
+from stewart.buffers.rollout_buffer import RolloutBuffer
+from stewart.models.actor_critic_cnn import ActorCriticCNN
+from stewart.agent.ppo import PPO
 from gymnasium.wrappers import FrameStackObservation
 
 def _make_logdir(log_dir_base="runs/stewart_ppo", run_name=None):
+    """
+    Crea una carpeta de logs única basada en timestamp o un nombre personalizado.
+    """
     ts = time.strftime("%Y%m%d-%H%M%S")
     run_name = ts if run_name is None else run_name
     log_dir = os.path.join(log_dir_base, run_name)
@@ -16,6 +33,9 @@ def _make_logdir(log_dir_base="runs/stewart_ppo", run_name=None):
     return log_dir
 
 def set_global_seed(seed):
+    """
+    Configura la semilla global para reproducibilidad.
+    """
     if seed is None: return
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -26,24 +46,48 @@ def main(
     total_steps=500_000,
     n_steps=1024,
     img_size=84,
-    seed=42,
+    seed=random.randint(0, 2**32 - 1),
     device="cuda" if torch.cuda.is_available() else "cpu",
     log_dir_base="runs/stewart_ppo",
     run_name=None,
     print_every=1000,   # << NUEVO
 ):
+    """
+    Entrena un agente PPO en el entorno StewartBalanceEnv.
+
+    Argumentos:
+        total_steps     (int): número total de pasos de entrenamiento.
+        n_steps         (int): pasos por rollout antes de cada update.
+        img_size        (int): tamaño de imagen cuadrado (HxW).
+        seed            (int): semilla para reproducibilidad.
+        device         (str): "cuda" o "cpu".
+        log_dir_base   (str): carpeta base para guardar logs.
+        run_name       (str): nombre opcional del experimento.
+        print_every     (int): cada cuántos pasos imprimir info.
+    """
+
     log_dir = _make_logdir(log_dir_base, run_name)
     set_global_seed(seed)
 
+
+    # ------------------------------
+    # Inicialización del entorno
+    # ------------------------------
     env = StewartBalanceEnv.make()
 
     obs_shape = (12, img_size, img_size)
     action_dim = 3
 
+    # ------------------------------
+    # Modelo + algoritmo PPO
+    # ------------------------------
     model = ActorCriticCNN(action_dim=action_dim, obs_shape=obs_shape).to(device)
     algo = PPO(model=model, obs_shape=obs_shape, action_dim=action_dim, device=device)
     buffer = RolloutBuffer(n_steps, obs_shape, action_dim, device)
 
+    # ------------------------------
+    # Logger
+    # ------------------------------
     writer = SummaryWriter(log_dir=log_dir)
     hparams = dict(total_steps=total_steps, n_steps=n_steps, img_size=img_size,
                    seed=seed, device=device, log_dir=log_dir, print_every=print_every)
@@ -51,6 +95,10 @@ def main(
     with open(os.path.join(log_dir, "hparams.json"), "w") as f:
         json.dump(hparams, f, indent=2)
 
+    
+    # ------------------------------
+    # Bucle principal de entrenamiento
+    # ------------------------------
     obs, _ = env.reset(seed=seed, options={"init_joint_deg": 20})
     ep_return, ep_len = 0.0, 0
     ep_idx = 0     
@@ -133,15 +181,20 @@ def main(
             _, last_value = model.forward(obs_t)
             last_value = float(last_value.item())
         buffer.compute_returns_adv(last_value)
+        algo.last_mean_advantage = float(buffer.advantages[:buffer.ptr].mean())
 
         # --- update PPO ---
         losses = algo.update(buffer=buffer, epochs=4, batch_size=64)
         arr = np.array(losses)
         pl, vl, ent = arr[:, 0].mean(), arr[:, 1].mean(), arr[:, 2].mean()
+        grad = arr[:, 3].mean()
 
         writer.add_scalar("loss/policy",  pl,  global_step=step)
         writer.add_scalar("loss/value",   vl,  global_step=step)
         writer.add_scalar("loss/entropy", ent, global_step=step)
+        writer.add_scalar("loss/grad_norm", grad, global_step=step)
+        writer.add_scalar("advantage/mean", algo.last_mean_advantage, global_step=step)
+        writer.add_scalar("advantage/std", buffer.advantages[:buffer.ptr].std(), global_step=step)
 
         update_idx += 1
         print(f"update[{update_idx}] step={step}: policy={pl:.3f} value={vl:.3f} ent={ent:.3f}")

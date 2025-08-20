@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class SmallCNN(nn.Module):
+class VisionCNN(nn.Module):
     """
     Entrada: (B,3,H,W) float o uint8; también acepta (B,H,W,3).
     Salida:  (B, feat_dim)

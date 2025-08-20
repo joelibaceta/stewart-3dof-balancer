@@ -33,13 +33,12 @@ def colorize_seg(rgb, obj_id, link_idx, robot_id, top_link, ball_id):
     return vis, top_mask, ball_mask
 
 # ---------- main ----------
-def main(img_size=84, use_gui=False, reward_mode="image",
+def main(img_size=84, use_gui=False,
          steps=100, fps=30, random_actions=True, action_str=None,
          show_seg=False, seed=None, hold=8, amp=0.5, smooth=0.85):
     env = StewartBalanceEnv(
         img_size=img_size,
         use_gui=use_gui,
-        reward_mode=reward_mode,
         action_scale=0.35,
         spawn_margin_frac=0.2
     )
@@ -136,7 +135,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--img_size", type=int, default=84)
     ap.add_argument("--gui", action="store_true")
-    ap.add_argument("--reward", type=str, default="geom", choices=["geom","image"])
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--random", action="store_true")
@@ -151,7 +149,6 @@ if __name__ == "__main__":
     main(
         img_size=args.img_size,
         use_gui=args.gui,
-        reward_mode=args.reward,
         steps=args.steps,
         fps=args.fps,
         random_actions=args.random,

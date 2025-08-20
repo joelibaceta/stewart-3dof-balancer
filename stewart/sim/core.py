@@ -337,17 +337,6 @@ class StewartSimCore:
         (x, y, _), _ = p.multiplyTransforms(inv_pos, inv_orn, ball_pos, [0,0,0,1])
         return float(x), float(y)
 
-    def circumcenter_local_xy(self):
-        A, B, C, _, _ = self._get_top_vertices_xy()
-        ax, ay = A; bx, by = B; cx, cy = C
-        d = 2.0 * (ax*(by-cy) + bx*(cy-ay) + cx*(ay-by))
-        if abs(d) < 1e-12:
-            ux, uy = (ax+bx+cx)/3.0, (ay+by+cy)/3.0
-        else:
-            ax2 = ax*ax + ay*ay; bx2 = bx*bx + by*by; cx2 = cx*cx + cy*cy
-            ux = (ax2*(by-cy) + bx2*(cy-ay) + cx2*(ay-by)) / d
-            uy = (ax2*(cx-bx) + bx2*(ax-cx) + cx2*(bx-ax)) / d
-        return float(ux), float(uy)
 
     # ---------- debug helpers ----------
     def _draw_axes_at(self, pos, orn, scale=0.05, life=0.2):

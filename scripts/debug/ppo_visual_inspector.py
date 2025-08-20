@@ -3,14 +3,13 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from stewart.envs.steward_sim_env import StewartBalanceEnv
-from stewart.rl.models.actor_critic import ActorCriticCNN
+from stewart.envs.stewart_env import StewartBalanceEnv
+from stewart.models.actor_critic_cnn import ActorCriticCNN
 
 def run_live_inspector(img_size=84, device="cpu", steps=300, fps=10):
     env = StewartBalanceEnv(
         img_size=img_size,
         use_gui=False,
-        reward_mode="image",
         render_camera=True,
     )
 

@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
-from .models.actor_critic import ActorCriticCNN
-from .storage import RolloutBuffer
+from stewart.models.actor_critic_cnn import ActorCriticCNN
+from stewart.buffers.rollout_buffer import RolloutBuffer
 import numpy as np
 
 class PPO:
@@ -54,9 +54,8 @@ class PPO:
         self.gamma, self.gae_lambda = gamma, gae_lambda
         self.clip_coef, self.vf_coef, self.ent_coef = clip_coef, vf_coef, ent_coef
         self.max_grad_norm = max_grad_norm
+        self.last_mean_advantage = 0.0
 
-        # Se puede mantener para usar collect_rollout();
-        # tu script puede usar su propio buffer externo.
         self.buffer = RolloutBuffer(
             n_steps,
             (
@@ -77,38 +76,6 @@ class PPO:
         t = t.permute(2, 0, 1).unsqueeze(0).contiguous()  # (1,C,H,W)
         return t
 
-    def collect_rollout(self, env):
-        """
-        Ejecuta un rollout en el entorno durante `n_steps` pasos y guarda las transiciones en el buffer interno.
-        """
-        self.buffer.ptr = 0
-        obs, _ = env.reset()
-        for _ in range(self.n_steps):
-            obs_t = self._obs_to_tensor(obs)
-            action, logprob, value = self.model.act(obs_t)
-            action_np = action.squeeze(0).cpu().numpy()
-
-            next_obs, reward, terminated, truncated, _ = env.step(action_np)
-            done = terminated or truncated
-
-            # Guarda transición en el buffer (según la firma esperada)
-            self.buffer.add(
-                obs,
-                action_np,
-                logprob.squeeze(0),
-                value.squeeze(0),
-                float(reward),
-                done,
-            )
-
-            obs = next_obs
-            if done:
-                obs, _ = env.reset()
-
-        # Bootstrap final para GAE (valor estimado del último estado)
-        obs_t = self._obs_to_tensor(obs)
-        _, _, last_value = self.model.forward(obs_t)
-        self.buffer.compute_gae(last_value.squeeze(0), self.gamma, self.gae_lambda)
 
     def update(self, buffer=None, epochs=None, batch_size=None):
         """
@@ -129,6 +96,7 @@ class PPO:
 
                 # Normalización de observaciones (de 0 a 1)
                 obs_b = obs_b.float() / 255.0
+                
 
                 # Evaluación de acciones actuales (nuevas logits, entropía, valor)
                 newlog, entropy, values = self.model.evaluate_actions(obs_b, act_b)
@@ -153,11 +121,16 @@ class PPO:
                 # Backpropagation
                 self.opt.zero_grad(set_to_none=True)
                 loss.backward()
+                grad_norm = 0.0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        grad_norm += p.grad.data.norm(2).item() ** 2
+                grad_norm = grad_norm ** 0.5 
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.max_grad_norm
                 )
                 self.opt.step()
 
-                out.append([pg_loss.item(), v_loss.item(), ent.item()])
+                out.append([pg_loss.item(), v_loss.item(), ent.item(), grad_norm])
 
         return out

@@ -15,8 +15,7 @@ def outline(mask: np.ndarray):
     return np.logical_and(dil, ~mask)
 
 def main(img_size=128, use_gui=False, steps=1, save=None, rotate_note=True):
-    env = StewartBalanceEnv(img_size=img_size, use_gui=use_gui,
-                            reward_mode="image", action_scale=0.0)
+    env = StewartBalanceEnv(img_size=img_size, use_gui=use_gui, action_scale=0.0)
     obs, _ = env.reset()
 
     # 1) pedir frame y seg

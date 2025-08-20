@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.distributions import Normal, Independent, TransformedDistribution, TanhTransform
-from .vision import SmallCNN
+from stewart.models.vision_cnn import VisionCNN
 import numpy as np  # usado en la fórmula de entropía
 
 class ActorCriticCNN(nn.Module):
@@ -42,7 +42,7 @@ class ActorCriticCNN(nn.Module):
                 in_channels = int(c2)
 
         # Red convolucional para extraer features del input visual
-        self.backbone = SmallCNN(in_channels=in_channels, feat_dim=feature_dim)
+        self.backbone = VisionCNN(in_channels=in_channels, feat_dim=feature_dim)
 
         # Actor: red totalmente conectada que predice la media de la acción
         self.policy = nn.Sequential(
