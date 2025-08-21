@@ -56,6 +56,12 @@ class PPO:
         self.max_grad_norm = max_grad_norm
         self.last_mean_advantage = 0.0
 
+        self.ent_coef_base = ent_coef
+        self.entropy_anneal_pct = 0.1  # o recíbelo como argumento también si quieres que sea configurable
+        self.total_steps = int(1e6)    # también configurable
+        self.entropy_anneal_steps = int(self.total_steps * self.entropy_anneal_pct)
+        self.current_step = 0
+
         self.buffer = RolloutBuffer(
             n_steps,
             (
@@ -84,6 +90,9 @@ class PPO:
         Devuelve:
         Lista con [policy_loss, value_loss, entropy] por minibatch.
         """
+        progress = min(self.current_step / self.entropy_anneal_steps, 1.0)
+        current_ent_coef = self.ent_coef_base * (1.0 - progress)
+
         buf = buffer if buffer is not None else self.buffer
         epochs = epochs or self.epochs
         batch_size = batch_size or self.batch_size
@@ -117,7 +126,7 @@ class PPO:
                 ent = entropy.mean() if hasattr(entropy, "mean") else entropy
 
                 # Pérdida total
-                loss = pg_loss + self.vf_coef * v_loss - self.ent_coef * ent
+                loss = pg_loss + self.vf_coef * v_loss - current_ent_coef * ent
 
                 # Backpropagation
                 self.opt.zero_grad(set_to_none=True)

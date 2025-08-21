@@ -129,38 +129,29 @@ class ActorCriticCNN(nn.Module):
 
         return action, logprob, value
 
-    def evaluate_actions(self, obs, actions, entropy_type="approx"):
+    def evaluate_actions(self, obs, actions):
         """
         Evalúa un batch de acciones bajo la política actual.
 
         Parámetros:
         - obs: batch de observaciones
-        - actions: batch de acciones tomadas (ya transformadas con tanh)
-        - entropy_type: "approx" para entropía aproximada de la Normal base; "none" para ignorarla.
+        - actions: batch de acciones tomadas
 
         Devuelve:
-        - logprob: log-probabilidad de las acciones bajo la política actual (con corrección tanh)
-        - entropy: entropía estimada de la política
+        - logprob: log-probabilidad de las acciones dadas
+        - entropy: entropía aproximada de la política
         - value: valor estimado de los estados
         """
         dist, value = self.forward(obs)
 
-        # Evita valores extremos cercanos a ±1 que podrían causar NaN al invertir tanh
+        # Evita problemas numéricos en los bordes del tanh
         actions = actions.clamp(-1 + 1e-6, 1 - 1e-6)
+        logprob = dist.log_prob(actions)
 
-        # Calcula la log-probabilidad corregida (acción fue post-tanh)
-        # Aplicamos la corrección del Jacobiano inverso del tanh
-        pre_tanh = torch.atanh(actions)  # inv(tanh)
-        logprob = dist.log_prob(pre_tanh)
-        logprob = logprob.sum(-1)
-        logprob -= torch.log(1 - actions.pow(2) + 1e-6).sum(dim=-1)  # jacobiano tanh
-
-        # Entropía de la distribución (aproximada, ignorando tanh)
-        if entropy_type == "approx":
-            logstd = self.logstd.clamp(-5.0, 2.0)
-            entropy = 0.5 + 0.5 * np.log(2 * np.pi) + logstd
-            entropy = entropy.sum(-1).mean()
-        else:
-            entropy = torch.tensor(0.0, device=obs.device)
+        # Entropía aproximada de la política (usando la base Normal, ignorando tanh)
+        logstd = self.logstd.clamp(-5.0, 2.0)
+        entropy = 0.5 + 0.5 * np.log(2 * np.pi) + logstd
+        entropy = entropy.sum(-1)
+        entropy = entropy.mean()
 
         return logprob, entropy, value
