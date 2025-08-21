@@ -198,7 +198,12 @@ class StewartSimCore:
         A = to_local_xy_w(a_w); B = to_local_xy_w(b_w); C = to_local_xy_w(c_w)
         return A, B, C, top_pos, top_orn
 
-    def sample_point_on_top(self, margin_frac: float | None = 0.2, margin_m: float | None = None):
+    def sample_point_on_top(
+        self, 
+        margin_frac: float | None = 0.2, 
+        margin_m: float | None = None,
+        bias_strength: float = 0.3  # 0 = sin sesgo, 1 = completamente al centro
+    ):
         if margin_m is None:
             margin_m = self.ball_r + 0.015
 
@@ -207,16 +212,28 @@ class StewartSimCore:
         if margin_m is not None and margin_m > 0.0:
             A2, B2, C2 = offset_triangle_metric(A, B, C, float(margin_m))
         else:
-            # fallback fraccional
             from .utils import triangle_incenter, shrink_triangle_towards
             I = triangle_incenter(A, B, C)
             t = float(np.clip(margin_frac or 0.0, 0.0, 0.49))
             A2, B2, C2 = shrink_triangle_towards(A, B, C, I, t)
 
-        x_local, y_local = sample_uniform_triangle(self.rng, A2, B2, C2)
+        # Muestreo uniforme dentro del triángulo
+        u = self.rng.uniform(0, 1)
+        v = self.rng.uniform(0, 1 - u)
+        w = 1 - u - v
+        point = u * np.array(A2) + v * np.array(B2) + w * np.array(C2)
+
+        # Incenter para sesgo
+        from .utils import triangle_incenter
+        I = np.array(triangle_incenter(A2, B2, C2))
+
+        # Interpolación hacia el incentro
+        biased_point = (1 - bias_strength) * point + bias_strength * I
+        x_local, y_local = biased_point
 
         X, Y, Z = axes_from_quat(top_orn)
         lift = self.ball_r + 0.01
+
         return [
             top_pos[0] + X[0]*x_local + Y[0]*y_local + Z[0]*lift,
             top_pos[1] + X[1]*x_local + Y[1]*y_local + Z[1]*lift,

@@ -33,14 +33,8 @@ class ActorCriticCNN(nn.Module):
         super().__init__()
 
         # Deducción de canales de entrada a partir de la forma de la observación
-        in_channels = 3  # por defecto RGB
-        if obs_shape is not None and len(obs_shape) == 3:
-            c0, c1, c2 = obs_shape
-            if c0 <= 64:      # probablemente formato (C,H,W)
-                in_channels = int(c0)
-            elif c2 <= 64:    # probablemente formato (H,W,C)
-                in_channels = int(c2)
-
+        in_channels = 12  # por defecto RGB stack de 4 frames
+   
         # Red convolucional para extraer features del input visual
         self.backbone = VisionCNN(in_channels=in_channels, feat_dim=feature_dim)
 
@@ -52,8 +46,9 @@ class ActorCriticCNN(nn.Module):
 
         # Crítico: red que predice el valor del estado
         self.value_head = nn.Sequential(
-            nn.Linear(feature_dim, 128), nn.ReLU(inplace=True),
-            nn.Linear(128, 1)
+            nn.Linear(feature_dim, 64),
+            nn.Tanh(),  
+            nn.Linear(64, 1)
         )
 
         # log-std es un parámetro aprendido, compartido entre todos los estados (no depende de la observación)
@@ -61,17 +56,18 @@ class ActorCriticCNN(nn.Module):
 
         # Inicialización ortogonal para mayor estabilidad
         self.apply(self._ortho_init)
+        
 
     @staticmethod
     def _ortho_init(m):
         """
-        Inicialización ortogonal para capas lineales (estabiliza el entrenamiento).
+        Inicialización ortogonal para capas lineales y convolucionales.
         """
-        if isinstance(m, nn.Linear):
-            nn.init.orthogonal_(m.weight, gain=1.0)
+        if isinstance(m, (nn.Linear, nn.Conv2d)):
+            nn.init.orthogonal_(m.weight, gain=nn.init.calculate_gain('relu'))
             if m.bias is not None:
                 nn.init.zeros_(m.bias)
-
+    
     def forward(self, obs, return_pretanh_mean: bool = False):
         """
         Computa la distribución de acciones (policy) y el valor del estado (critic) para una observación dada.
@@ -120,32 +116,51 @@ class ActorCriticCNN(nn.Module):
         - value: valor estimado del estado
         """
         dist, value, mean = self.forward(obs, return_pretanh_mean=True)
-        action = torch.tanh(mean) if deterministic else dist.rsample()
-        logprob = dist.log_prob(action)
+
+        if deterministic:
+            action = torch.tanh(mean)
+            sampled = mean  # sin ruido
+        else:
+            sampled = dist.rsample()          
+            action = torch.tanh(sampled)   
+
+        logprob = dist.log_prob(sampled)    
+        logprob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1) 
+
         return action, logprob, value
 
-    def evaluate_actions(self, obs, actions):
+    def evaluate_actions(self, obs, actions, entropy_type="approx"):
         """
         Evalúa un batch de acciones bajo la política actual.
 
         Parámetros:
         - obs: batch de observaciones
-        - actions: batch de acciones tomadas
+        - actions: batch de acciones tomadas (ya transformadas con tanh)
+        - entropy_type: "approx" para entropía aproximada de la Normal base; "none" para ignorarla.
 
         Devuelve:
-        - logprob: log-probabilidad de las acciones dadas
-        - entropy: entropía aproximada de la política
+        - logprob: log-probabilidad de las acciones bajo la política actual (con corrección tanh)
+        - entropy: entropía estimada de la política
         - value: valor estimado de los estados
         """
         dist, value = self.forward(obs)
 
-        # Evita problemas numéricos en los bordes del tanh
+        # Evita valores extremos cercanos a ±1 que podrían causar NaN al invertir tanh
         actions = actions.clamp(-1 + 1e-6, 1 - 1e-6)
-        logprob = dist.log_prob(actions)
 
-        # Entropía aproximada de la política (usando la base Normal, ignorando tanh)
-        logstd = self.logstd.clamp(-5.0, 2.0)
-        entropy = 0.5 + 0.5 * np.log(2 * np.pi) + logstd
-        entropy = entropy.sum()
+        # Calcula la log-probabilidad corregida (acción fue post-tanh)
+        # Aplicamos la corrección del Jacobiano inverso del tanh
+        pre_tanh = torch.atanh(actions)  # inv(tanh)
+        logprob = dist.log_prob(pre_tanh)
+        logprob = logprob.sum(-1)
+        logprob -= torch.log(1 - actions.pow(2) + 1e-6).sum(dim=-1)  # jacobiano tanh
+
+        # Entropía de la distribución (aproximada, ignorando tanh)
+        if entropy_type == "approx":
+            logstd = self.logstd.clamp(-5.0, 2.0)
+            entropy = 0.5 + 0.5 * np.log(2 * np.pi) + logstd
+            entropy = entropy.sum(-1).mean()
+        else:
+            entropy = torch.tensor(0.0, device=obs.device)
 
         return logprob, entropy, value

@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
-
+import cv2
 class VisionCNN(nn.Module):
     """
     Entrada: (B,3,H,W) float o uint8; también acepta (B,H,W,3).
     Salida:  (B, feat_dim)
     Independiente de H y W gracias a GlobalAvgPool.
     """
-    def __init__(self, in_channels=3, feat_dim=256, **kwargs):
+    def __init__(self, in_channels=12, feat_dim=256, **kwargs):
         # compat: si en algún lugar quedó out_dim, lo aceptamos como alias
         if "out_dim" in kwargs:
             feat_dim = kwargs.pop("out_dim")
@@ -30,6 +30,7 @@ class VisionCNN(nn.Module):
             nn.Linear(64, feat_dim),
             nn.ReLU(inplace=True),
         )
+
 
     def forward(self, x: torch.Tensor):
         # normaliza si viene uint8

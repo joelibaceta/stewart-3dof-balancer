@@ -11,7 +11,8 @@ Requisitos:
 - Imagenes en CHW (usando wrapper `ToCHW`)
 - Rollout buffer externo
 """
-
+import cv2
+import numpy as np
 import random
 import os, json, time, numpy as np, torch
 from torch.utils.tensorboard import SummaryWriter
@@ -41,6 +42,34 @@ def set_global_seed(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+def mostrar_observacion(obs_tensor, wait=200):
+    """
+    Muestra la última imagen RGB de un stack de frames (esperado: (B, 12, H, W)).
+    """
+    obs_tensor = obs_tensor.squeeze(0)  # (12,H,W)
+
+    if obs_tensor.ndim != 3:
+        print("Error: la observación no tiene 3 dimensiones (C,H,W)")
+        return
+
+    c, h, w = obs_tensor.shape
+    if c != 12:
+        print(f"Advertencia: número de canales inesperado ({c}), se esperaba 12 para stack de 4 frames RGB")
+
+    # Tomar solo los últimos 3 canales (último frame)
+    obs_tensor = obs_tensor[-3:, :, :]  # (3,H,W)
+
+    # Convertir a numpy y reescalar
+    obs_np = obs_tensor.detach().cpu().numpy()
+    obs_np = np.transpose(obs_np, (1, 2, 0))  # (H,W,C)
+    obs_np = np.clip(obs_np * 255.0, 0, 255).astype(np.uint8)
+
+    # Convertir de RGB a BGR
+    bgr = cv2.cvtColor(obs_np, cv2.COLOR_RGB2BGR)
+    cv2.imshow("Input a CNN", bgr)
+    cv2.waitKey(wait)
+
 
 def main(
     total_steps=500_000,
@@ -118,6 +147,8 @@ def main(
             with torch.no_grad():
                 action, logp, value = model.act(obs_t)
             action_np = action.squeeze(0).cpu().numpy()
+
+            writer.add_scalar("value/estimate", float(value.item()), global_step=step+1)
 
             # (2) env step
             next_obs, reward, term, trunc, info = env.step(action_np)

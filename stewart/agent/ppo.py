@@ -17,14 +17,14 @@ class PPO:
         action_dim=3,
         device="cuda" if torch.cuda.is_available() else "cpu",
         lr=3e-4,
-        n_steps=2048,
+        n_steps=1024,
         batch_size=256,
-        epochs=4,
+        epochs=6,
         gamma=0.99,
-        gae_lambda=0.95,
+        gae_lambda=0.98,
         clip_coef=0.2,
         vf_coef=0.5,
-        ent_coef=0.01,
+        ent_coef=0.001,
         max_grad_norm=0.5,
     ):
         """
@@ -92,10 +92,11 @@ class PPO:
         for _ in range(epochs):
             for obs_b, act_b, oldlog_b, adv_b, ret_b in buf.get(batch_size):
                 # Normalización de ventajas
-                adv_b = (adv_b - adv_b.mean()) / (adv_b.std() + 1e-8)
+                adv_b = ((adv_b - adv_b.mean()) / (adv_b.std() + 1e-8)).detach()
 
                 # Normalización de observaciones (de 0 a 1)
-                obs_b = obs_b.float() / 255.0
+                if obs_b.dtype == torch.uint8:
+                    obs_b = obs_b.float() / 255.0
                 
 
                 # Evaluación de acciones actuales (nuevas logits, entropía, valor)

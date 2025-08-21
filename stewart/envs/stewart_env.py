@@ -42,7 +42,7 @@ class StewartBalanceEnv(gym.Env):
         self,
         img_size=84,
         use_gui=False,
-        action_scale: float = 0.5,
+        action_scale: float = 0.4,
         k_in: float = 0.1,
         k_out: float = 0.1,
         k_center: float = 1.0,
@@ -121,7 +121,7 @@ class StewartBalanceEnv(gym.Env):
             render_camera=True,
         )
         env = FrameStackObservation(env, stack_size=4)
-        # env = ResetDelayWrapper(env, steps=2)
+        env = ResetDelayWrapper(env, steps=2)
         env = ToCHW(env)
         return env
 
@@ -197,6 +197,8 @@ class StewartBalanceEnv(gym.Env):
         # Se limita la acción al rango [-1, 1] y se escala por action_scale (en radianes)
         # para enviar valores físicamente válidos a los actuadores.
         a = np.clip(action, -1, 1).astype(np.float32) * self.action_scale
+
+        #a = action
 
         # --- Avanzar simulación ---
         # Se aplica la acción escalada en el simulador de la plataforma.
@@ -304,7 +306,7 @@ class StewartBalanceEnv(gym.Env):
         )
 
         # Esta función premia la cercanía de forma suave y continua
-        center_reward = self.k_center * (1.0 - min(dist_center / rmax_geom, 1.0))
+        center_reward = self.k_center * (1.0 - (dist_center / rmax_geom) ** 2)
 
         # Recompensa por estar dentro del triángulo (o penalización)
         inside = self._is_ball_inside_top(ball_pos)
