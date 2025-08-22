@@ -6,6 +6,8 @@
 \usepackage{cite}
 \usepackage{hyperref}
 
+
+\usepackage[caption=false,font=footnotesize]{subfig}
 \usepackage{microtype} % reduce Over/Underfull boxes
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta}
@@ -18,6 +20,18 @@
     \IEEEauthorblockA{
         \textit{Universidad Nacional de Ingeniería} \\
         joel.ibaceta.c@uni.pe
+    }
+    \and
+    \IEEEauthorblockN{Marco Antonio Barrera Ninamango}
+    \IEEEauthorblockA{
+        \textit{Universidad Nacional de Ingeniería} \\
+        marco.barrera.n@uni.pe
+    }
+    \and
+    \IEEEauthorblockN{Jesus Gianpierre Campos Cardenas}
+    \IEEEauthorblockA{
+        \textit{Universidad Nacional de Ingeniería} \\
+        j.campos.c@uni.pe
     }
 }
 
@@ -108,72 +122,96 @@ Top: fricción lat./rod./giro & $0.12 / 0 / 0$ \\
 El entorno (\texttt{StewartBalanceEnv}) expone observaciones visuales RGB de tamaño $84{\times}84$ píxeles. Para dotar de inercia visual, se apilan $4$ cuadros consecutivos mediante \texttt{FrameStackObservation}, obteniéndose un tensor $\mathbf{o}_t \in [0,255]^{84\times 84\times 12}$ que se normaliza a $[0,1]$ y se reordena a formato CHW (\texttt{ToCHW}).\\
 El espacio de acción es continuo, $\mathcal{A}=[-1,1]^3$, y se interpreta como comandos normalizados para tres articulaciones. Cada acción se escala por un factor $\alpha{=}0.3$~rad y se aplica en \textit{position control} de PyBullet con fuerza máxima $80$~N$\cdot$m; por paso del entorno se integran $4$ subpasos de simulación.
 
+\begin{figure}[th]
+  \centering
+  \includegraphics[width=.68\columnwidth,keepaspectratio]{figs/obs.png}
+  \caption{Observación visual usada por el agente: imagen RGB de $84{\times}84$ px capturada por la cámara cenital. En entrenamiento se apilan $4$ cuadros consecutivos (stack en canal) y se reordenan a CHW para la CNN.}
+  \label{fig:obs}
+\end{figure}
+
 \subsection{Función de recompensa}
-La señal de recompensa es densa y suave, diseñada para entornos continuos. Sea
-$A,B,C\in\mathbb{R}^2$ el triángulo de la plataforma superior en coordenadas locales,
-$\mathbf{x}_t\!\in\!\mathbb{R}^2$ la proyección local de la bola y
-$\mathbf{c}$ el circuncentro del triángulo.
-Definimos el radio de normalización
-$
-r_{\max}=\max\{\|\!A-\mathbf{c}\!\|,\|\!B-\mathbf{c}\!\|,\|\!C-\mathbf{c}\!\|\}
-$
-y la distancia normalizada
-$
-d_t=\|\mathbf{x}_t-\mathbf{c}\|/(r_{\max}+10^{-8}).
-$
-Sea además $\Delta\mathbf{a}_t=\mathbf{a}_t-\mathbf{a}_{t-1}$ el incremento de acción.
-La recompensa total es
+\label{subsec:reward}
+Sea $\mathbf{x}_t\!\in\!\mathbb{R}^2$ la posición local de la bola sobre la plataforma superior en el paso $t$, y $c$ el centro del triángulo (circuncentro). Denotamos por $r_{\max}$ el radio máximo del triángulo en coordenadas locales (distancia del centro al vértice más lejano). La distancia normalizada al centro es
 \begin{equation}
-\label{eq:rt-sum}
-r_t \;=\; r_t^{\mathrm{prog}} \;+\; r_t^{\mathrm{pot}} \;+\;
-r_t^{\mathrm{in}} \;+\; r_t^{\mathrm{vel}} \;+\;
-r_t^{\Delta} \;+\; r_t^{\mathrm{alive}} .
+\small
+d_t \;=\; \frac{\lVert \mathbf{x}_t - c \rVert_2}{\,r_{\max}+10^{-8}\,}\in[0,\infty), 
+\qquad
+\dot{\mathbf{x}}_t \approx \frac{\mathbf{x}_t-\mathbf{x}_{t-1}}{\Delta t}.
+\label{eq:dnorm}
 \end{equation}
 
-\paragraph{Progreso radial.}
-Favorece acercarse al centro entre pasos consecutivos:
+La recompensa total es la suma de seis términos:
 \begin{equation}
-r_t^{\mathrm{prog}} \;=\; w_{\mathrm{prog}}\,(d_{t-1}-d_t), \qquad w_{\mathrm{prog}}=0.50.
+\small
+r_t \;=\; r_t^{\mathrm{prog}} + r_t^{\mathrm{pot}} + r_t^{\mathrm{in}} + r_t^{\mathrm{vel}} + r_t^{\Delta} + r_t^{\mathrm{alive}}.
+\label{eq:r_total}
 \end{equation}
 
-\paragraph{Potencial centrípeto.}
-Un pozo cuadrático suave estabiliza en la vecindad del centro:
+\paragraph{(a) Progreso radial}
+Recompensa instantánea por acercamiento al centro (densa y con signo):
 \begin{equation}
-r_t^{\mathrm{pot}} \;=\; -\,w_{\mathrm{pot}}\, d_t^2, \qquad w_{\mathrm{pot}}=0.10.
+\small
+r_t^{\mathrm{prog}} \;=\; w_{\mathrm{prog}}\,(d_{t-1} - d_t).
 \end{equation}
 
-\paragraph{``Inside'' suave.}
-Sea $(u,v,w)$ la coordenada baricéntrica de $\mathbf{x}_t$ respecto de $(A,B,C)$ y
-$m=\tfrac{1}{2}r_b$ un margen proporcional al radio de la bola $r_b$.
-Se usa una transición suave tipo \emph{smoothstep}
+\paragraph{(b) Potencial cuadrático suave}
+Pozo que estabiliza cerca de $c$:
+\begin{equation}
+\small
+r_t^{\mathrm{pot}} \;=\; -\,w_{\mathrm{pot}}\, d_t^{\,2}.
+\end{equation}
+
+\paragraph{(c) ``Inside'' suave con margen}
+Sea $(u,v,w)$ la coordenada baricéntrica de $\mathbf{x}_t$ respecto a $(A,B,C)$ y $x_{\min}=\min\{u,v,w\}$. Con margen métrico $m=\tfrac{1}{2}r_b$ (siendo $r_b$ el radio de la bola), usamos un \textit{smoothstep} cúbico:
 \[
-s(a,b,x)=t^2(3-2t),\;\; t=\mathrm{clip}\!\left(\frac{x-a}{b-a},\,0,1\right),
+\small
+s(a,b,x)=t^2(3-2t), \quad 
+t=\mathrm{clip}\!\left(\frac{x-a}{b-a},\,0,1\right).
 \]
-aplicada a $x_{\min}=\min\{u,v,w\}$:
+La contribución queda
 \begin{equation}
-r_t^{\mathrm{in}} \;=\; w_{\mathrm{in}}\bigl(2\,s(-m,\,+m,\,x_{\min})-1\bigr),
-\qquad w_{\mathrm{in}}=0.20 .
+\small
+r_t^{\mathrm{in}} \;=\; w_{\mathrm{in}}\Big(2\,s(-m,m,x_{\min})-1\Big).
 \end{equation}
-Este término evita discontinuidades en el borde del triángulo.
+Este término evita discontinuidades en el borde del triángulo y aporta gradiente útil hacia el interior.
 
-\paragraph{Velocidad cerca del centro.}
-Se penaliza la velocidad de la bola sólo cuando $d_t$ es pequeño,
-mediante una ventana gaussiana $\,\mathrm{near}(d_t)=\exp(-(d_t/\sigma)^2)$:
+\paragraph{(d) Velocidad penalizada cerca del centro}
+Sólo se penaliza la velocidad cuando $d_t$ es pequeño, usando una ventana gaussiana $\mathrm{near}(d_t)=\exp(- (d_t/\sigma)^2)$:
 \begin{equation}
-r_t^{\mathrm{vel}} \;=\; -\,w_{\mathrm{vel}}\,
-\mathrm{near}(d_t)\,\frac{\|\dot{\mathbf{x}}_t\|}{v_{\mathrm{ref}}+10^{-8}},
-\quad \sigma=0.25,\; v_{\mathrm{ref}}=0.10~\mathrm{m/s},\;
-w_{\mathrm{vel}}=0.05 .
+\small
+r_t^{\mathrm{vel}}
+\;=\;
+-\,w_{\mathrm{vel}}\,\mathrm{near}(d_t)\,
+\frac{\lVert \dot{\mathbf{x}}_t\rVert_2}{\,v_{\mathrm{ref}}+10^{-8}} .
+\label{eq:rvel}
 \end{equation}
 
-\paragraph{Suavidad de acción y bono de vida.}
+\paragraph{(e) Suavidad de acción y bono de vida}
+Con $\Delta\mathbf{a}_t$ el incremento de acción entre pasos:
 \begin{equation}
-r_t^{\Delta} \;=\; -\,\kappa_{\Delta}\,\|\Delta\mathbf{a}_t\|_2,
-\qquad \kappa_{\Delta}=0.01,
+\small
+r_t^{\Delta} \;=\; -\,\kappa_{\Delta}\,\lVert \Delta\mathbf{a}_t\rVert_2,
 \qquad
 r_t^{\mathrm{alive}} \;=\; 10^{-3}.
 \end{equation}
 
+\paragraph{Valores por defecto}
+A menos que se indique lo contrario, se usa
+\[
+\small
+w_{\mathrm{prog}}=0.50,\;\;
+w_{\mathrm{pot}}=0.10,\;\;
+w_{\mathrm{in}}=0.20,\;\;
+w_{\mathrm{vel}}=0.05,
+\]
+\[
+\small
+\sigma=0.25,\;\;
+v_{\mathrm{ref}}=0.10~\mathrm{m/s},\;\;
+\kappa_{\Delta}=0.01,\;\;
+r_t^{\mathrm{alive}}=10^{-3}.
+\]
+Esta descomposición provee una señal densa, diferenciable y bien condicionada: \(r_t^{\mathrm{prog}}\) guía el acercamiento, \(r_t^{\mathrm{pot}}\) sostiene la estabilización, \(r_t^{\mathrm{in}}\) reemplaza el indicador duro por una transición suave en el borde, \(r_t^{\mathrm{vel}}\) amortigua oscilaciones en la vecindad del centro, \(r_t^{\Delta}\) favorece acciones suaves y \(r_t^{\mathrm{alive}}\) desincentiva terminaciones prematuras.
 
 \subsection{Criterios de terminación}
 Un episodio termina si la bola permanece fuera del triángulo durante $\geq 8$ pasos consecutivos (\texttt{out\_patience}). Se trunca al alcanzar $2000$ pasos.
@@ -309,39 +347,101 @@ donde $T$ es el número total de pasos de entrenamiento. La política es gaussia
 \item Actualizar $\theta_{\mathrm{old}}\!\leftarrow\!\theta$; registrar métricas (pérdidas, entropía, norma del gradiente, retorno/longitud de episodio) en TensorBoard.
 \end{enumerate}
 
+
 \section{Resultados}
-Tras varias iteraciones de entrenamiento, el agente logra mantener la pelota dentro de la región central durante largos periodos, mostrando aprendizaje emergente de estabilidad y control suave. Se incluyen curvas de recompensa y capturas del comportamiento.
+Se entrenó el agente durante \(\sim 10^5\) pasos de interacción (equivalentes a varios centenares de episodios). La Fig.~\ref{fig:ep-perf} resume el desempeño: el \emph{return} por episodio muestra una tendencia monótonamente creciente y se estabiliza en torno a \(2.4\text{–}2.6\times 10^2\), mientras que la longitud de episodio aumenta de forma sostenida (incremento aproximado de \(3\text{–}4\times\)), evidenciando que la política aprende a mantener la esfera dentro del área objetivo durante intervalos cada vez más prolongados.
 
-\section{Conclusión y trabajo futuro}
-Los resultados validan la viabilidad de aplicar PPO para controlar plataformas Stewart simplificadas. Se propone como trabajo futuro la extensión a plataformas con 6 GDL y control directo del actuador físico.
+La Fig.~\ref{fig:opt-stab} caracteriza la optimización. La pérdida de política (PPO \emph{clipped}) desciende rápidamente y se aproxima a cero, indicando convergencia de la política bajo el criterio proximal. La pérdida del crítico decrece de forma marcada, reflejando estimaciones de valor más consistentes a medida que progresa el entrenamiento. En paralelo, el coeficiente de entropía \(\,c_{\mathrm{ent}}(t)\,\) se reduce (programa de \emph{annealing}), y la norma del gradiente cae desde valores altos (\(\sim 10^2\)) hasta un régimen estable en el que la dinámica de actualización permanece bien condicionada. En conjunto, estas curvas sugieren una transición ordenada de exploración a explotación sin inestabilidades numéricas.
 
-\section*{Agradecimientos}
-Este trabajo fue desarrollado de manera independiente como parte de una investigación personal en el área de robótica e inteligencia artificial aplicada.
+Para evaluar la calidad del control, la Fig.~\ref{fig:joints} presenta la evolución temporal de los ángulos en las tres articulaciones. Se observa una disminución progresiva de la varianza y de la amplitud pico–pico, con rangos típicos finales por debajo de unas pocas centésimas de radián. Este patrón es consistente con un comportamiento de \emph{servoing} más suave y con la penalización de variaciones de acción incluida en la señal de recompensa, lo que reduce oscilaciones y artefactos de saturación.
 
-\bibliographystyle{IEEEtran}
+En términos cualitativos, las trayectorias evidencian que la política aprendida inclina la plataforma en direcciones mínimas pero oportunas para recentrar la esfera sin exceder los límites articulares. Asimismo, la mejora simultánea de retorno y longitud, junto con la caída del coeficiente de entropía, sugiere que el esquema de \emph{annealing} resulta clave: con una entropía inicial suficiente para explorar la dinámica de contacto, y una reducción gradual que evita que el ruido estocástico “ensucie” la política en etapas avanzadas.
+
+\paragraph*{Limitaciones observadas.}
+Aun cuando el agente logra un control estable y suave, se identificaron dos retos: (i) la estimación implícita de velocidad a partir de observaciones exclusivamente visuales es no trivial; la política aprende un correlato suficientemente útil, pero persisten fallos esporádicos en transitorios rápidos cerca del borde del triángulo; (ii) el \emph{shaping} geométrico es eficaz en simulación, aunque su traslación directa al sistema físico (real2sim) exige una calibración dinámica cuidadosa para preservar el efecto de fricción y micro–rebotes. Estas observaciones motivan, como trabajo futuro, incorporar señales de estado mínimas adicionales (p.\,ej., velocidad proyectada estimada) o técnicas de \emph{domain randomization} orientadas a robustez sim–real.
+
+
+\begin{figure}[th]
+  \centering
+  \includegraphics[width=\columnwidth]{figs/episode_return.png}
+  \caption{Desempeño del agente: retorno por episodio (línea clara = media móvil).}
+  \label{fig:ep-perf}
+\end{figure}
+
+% Fig. 2: cuadrícula 2x2 con subfig
+\begin{figure}[th]
+  \centering
+  \subfloat[Loss de política]{%
+    \includegraphics[width=.48\columnwidth]{figs/loss_policy.png}}\hfill
+  \subfloat[Loss de valor]{%
+    \includegraphics[width=.48\columnwidth]{figs/loss_value.png}}\\[3pt]
+  \subfloat[Coef.\ de entropía]{%
+    \includegraphics[width=.48\columnwidth]{figs/loss_entropy_coef.png}}\hfill
+  \subfloat[Norma del gradiente]{%
+    \includegraphics[width=.48\columnwidth]{figs/loss_grad_norm.png}}
+  \caption{Curvas de optimización y estabilidad numérica.}
+  \label{fig:opt-stab}
+\end{figure}
+
+\begin{figure}[th]
+  \centering
+  \subfloat[$j_1$]{%
+    \includegraphics[width=.99\columnwidth]{figs/j1_rad.png}}
+  \caption{Evolución de los ángulos articulares: tendencia a movimientos más suaves.}
+  \label{fig:joints}
+\end{figure}
+
+\begin{figure}[th]
+  \centering
+  \includegraphics[width=\columnwidth,keepaspectratio]{figs/real_robot.png}
+  \caption{Prototipo físico del modelo en el mundo real: plataforma Stewart simplificada de 3~GDL.}
+  \label{fig:real-proto}
+\end{figure}
+
+\section{Conclusiones y discusión}
+Este trabajo mostró que una política PPO con arquitectura actor--crítico basada en visión (CNN) puede aprender a estabilizar una esfera sobre una plataforma Stewart simplificada de 3~GDL utilizando únicamente observaciones RGB apiladas. A partir de los experimentos realizados, destacamos:
+
+\textbf{1) Control continuo y entropía.}
+Aunque PPO resulta adecuado para espacios continuos, su desempeño es altamente sensible al diseño de la señal de recompensa, al coeficiente de entropía y al \emph{annealing} de dicho coeficiente. Sin un decaimiento progresivo de la entropía y una penalización a variaciones bruscas de acción, la política tiende a comportamientos ruidosos que impiden la estabilización fina.
+
+\textbf{2) Importancia del modelado físico.}
+Para que el aprendizaje sea estable, el entorno debe reflejar con fidelidad la interacción física bola--plataforma. En particular, los parámetros del solver (ERP/CFM), fricciones (lateral, de rodadura y de giro) y las restricciones que cierran el lazo cinemático influyen de forma directa en la calidad de los gradientes que recibe el agente y, por tanto, en la tasa de convergencia.
+
+\textbf{3) Observabilidad de la velocidad.}
+Inferir velocidad exclusivamente desde imágenes es difícil. El apilado de cuadros provee una pista temporal mínima, pero no sustituye una medición explícita. Aun así, se evitó inyectar velocidad o estados del simulador para mantener el objetivo de \emph{real-to-sim} basado en visión. Esta decisión, si bien conservó el realismo del flujo sensorial, hace el problema más exigente para PPO.
+
+\textbf{4) \emph{Shaping} geométrico y transferencia.}
+El \emph{shaping} hacia el circuncentro facilita la exploración y acelera el aprendizaje; sin embargo, parte del sesgo geométrico puede no trasladarse con fidelidad al dispositivo físico si la superficie no es ideal o si existen pequeñas asimetrías. En consecuencia, el rendimiento observado en simulación no necesariamente se replica en hardware sin una calibración o identificación cuidadosa de parámetros.
+
+En conjunto, los resultados confirman la viabilidad de PPO para este tipo de tareas visuales continuas, pero subrayan que la calidad del modelado físico y el tratamiento de la entropía son determinantes para evitar políticas ruidosas y para lograr estabilidad sostenida.
+
+\section{Limitaciones y trabajo futuro}
+Entre las principales limitaciones se encuentran: (i) ausencia de líneas base clásicas (p.\,ej., control PD/LQR con observación densa) para cuantificar la ganancia relativa del enfoque basado en RL; (ii) falta de una evaluación sistemática de robustez bajo variaciones de fricción y pendientes; y (iii) brecha \emph{sim--to--real} aún no verificada en prototipo físico.
+
+Como trabajo futuro se propone: (a) incorporar estimadores visuales de flujo óptico o \emph{self-supervised} para mejorar la observabilidad de velocidad sin romper el \emph{real-to-sim}; (b) combinar visión con un mínimo de propriocepción (ángulos o derivadas articulares) bajo un esquema de fusión que preserve transferibilidad; (c) utilizar \emph{domain randomization} e identificación de parámetros para cerrar la brecha \emph{sim--to--real}; y (d) evaluar políticas híbridas con objetivos geométricos más próximos a las restricciones físicas del prototipo.
+
 \begin{thebibliography}{00}
 
 \bibitem{Stewart1965}
 D.~Stewart, ``A platform with six degrees of freedom,'' \emph{Proceedings of the Institution of Mechanical Engineers}, vol.~180, no.~1, pp.~371--386, 1965.
 
 \bibitem{Merlet2006}
-J.-P.~Merlet, \emph{Parallel Robots}, 2nd~ed. Springer, 2006.
+J.-P.~Merlet, \emph{Parallel Robots}, 2nd~ed. Berlin, Heidelberg: Springer, 2006.
 
 \bibitem{Schulman2017PPO}
-J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov, ``Proximal Policy Optimization Algorithms,'' \emph{arXiv:1707.06347}, 2017.
+J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov, ``Proximal Policy Optimization Algorithms,'' arXiv:1707.06347, 2017.
 
 \bibitem{Lillicrap2016DDPG}
-T.~P.~Lillicrap, J.~J.~Hunt, A.~Pritzel, et~al., ``Continuous control with deep reinforcement learning,'' in \emph{Proc.\ ICLR}, 2016.
+T.~P.~Lillicrap, J.~J.~Hunt, A.~Pritzel, \emph{et al.}, ``Continuous control with deep reinforcement learning,'' in \emph{Proc. ICLR}, 2016.
 
 \bibitem{Haarnoja2018SAC}
-T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine, ``Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor,'' in \emph{Proc.\ ICML}, pp.~1861--1870, 2018.
+T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine, ``Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor,'' in \emph{Proc. ICML}, pp.~1861--1870, 2018.
 
-\bibitem{Levine2016EndToEnd}
-S.~Levine, P.~Pastor, A.~Krizhevsky, and D.~Quillen, ``Learning hand-eye coordination for robotic grasping with deep learning and large-scale data collection,'' \emph{Int.\ J.\ Robotics Research}, vol.~37, no.~4--5, pp.~421--436, 2018. % (versión preliminar: arXiv:1603.02199)
+\bibitem{Levine2018IJRR}
+S.~Levine, P.~Pastor, A.~Krizhevsky, and D.~Quillen, ``Learning hand-eye coordination for robotic grasping with deep learning and large-scale data collection,'' \emph{The International Journal of Robotics Research}, vol.~37, no.~4--5, pp.~421--436, 2018.
 
-\bibitem{Coumans2016PyBullet}
+\bibitem{CoumansPyBullet}
 E.~Coumans and Y.~Bai, ``PyBullet, a Python module for physics simulation for games, robotics and machine learning,'' 2016--2021. [Online]. Available: \url{https://pybullet.org}
-
 \end{thebibliography}
 
 \end{document}
