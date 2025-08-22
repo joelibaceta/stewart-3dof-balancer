@@ -1,0 +1,347 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{hyperref}
+
+\usepackage{microtype} % reduce Over/Underfull boxes
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta}
+
+
+\title{Control de una Plataforma Stewart Simplificada de 3 GDL mediante Proximal Policy Optimization}
+
+\author{
+    \IEEEauthorblockN{Joel Ibaceta}
+    \IEEEauthorblockA{
+        \textit{Universidad Nacional de Ingeniería} \\
+        joel.ibaceta.c@uni.pe
+    }
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Este trabajo presenta un enfoque de control basado en aprendizaje por refuerzo profundo para una plataforma Stewart simplificada con 3 grados de libertad (GDL). Se entrena una política mediante el algoritmo Proximal Policy Optimization (PPO) para lograr el control preciso de una pelota sobre la superficie móvil de la plataforma. Se describe el diseño mecánico, la generación del entorno simulado en PyBullet y la arquitectura de red basada en Actor-Critic. Los resultados muestran que el agente aprende a mantener la pelota dentro de la región objetivo a través de una combinación de recompensas modeladas cuidadosamente.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Plataforma Stewart, Aprendizaje por Refuerzo, PPO, PyBullet, Control Inteligente, Simulación Física.
+\end{IEEEkeywords}
+
+\section{Introducción}
+Las plataformas tipo Stewart, también conocidas como plataformas paralelas, han sido ampliamente empleadas en aplicaciones que requieren movimientos precisos en múltiples grados de libertad, como simuladores de vuelo, robótica de precisión y sistemas de estabilización. Su estructura cinemática cerrada proporciona una elevada rigidez y capacidad de respuesta, lo que las convierte en candidatas ideales para tareas de control fino.
+
+Sin embargo, el control de plataformas con múltiples grados de libertad en espacios de acción continuos plantea desafíos significativos para los métodos de aprendizaje por refuerzo. A diferencia de los entornos discretos, donde las políticas óptimas pueden explorarse exhaustivamente, los entornos continuos requieren aproximaciones funcionales eficientes y una cuidadosa exploración para evitar comportamientos inestables o subóptimos.
+
+En este trabajo se aborda el problema de controlar una plataforma Stewart simplificada con tres grados de libertad, cuyo objetivo es mantener una esfera en equilibrio sobre su superficie. Para ello, se emplea el algoritmo Proximal Policy Optimization (PPO), un método de optimización confiable dentro del marco Actor-Critic, conocido por su estabilidad y eficiencia en entornos continuos. Además, se presenta el diseño mecánico y la implementación del entorno de simulación en PyBullet, así como la arquitectura de red utilizada. El propósito es demostrar que es posible entrenar una política efectiva que genere comportamientos complejos de control sin supervisión directa ni modelado analítico detallado.
+
+\section{Antecedentes}
+Las plataformas paralelas tipo Stewart han sido estudiadas extensamente en control y robótica por su elevada rigidez y precisión, con resultados clásicos que abarcan modelado cinemático, análisis de singularidades y estrategias de control en lazo cerrado \cite{Stewart1965,Merlet2006}. En configuraciones con múltiples GDL, los métodos basados en modelo (p.\,ej., control computado del par, linealización, control robusto) han demostrado eficacia, pero requieren parametrizaciones precisas y pueden degradarse ante no linealidades de contacto o incertidumbres dinámicas.
+
+El aprendizaje por refuerzo profundo (DRL) ha emergido como una alternativa promisoria para control continuo, al optimizar políticas directamente a partir de señales de recompensa. En particular, \emph{Proximal Policy Optimization} (PPO) se ha consolidado como un método actor–crítico estable gracias a su objetivo con \emph{clipping}, mostrando buen desempeño en tareas continuas con observaciones de alta dimensión \cite{Schulman2017PPO}. Otros algoritmos relevantes incluyen DDPG \cite{Lillicrap2016DDPG} y SAC \cite{Haarnoja2018SAC}, que explotan políticas deterministas o máximos de entropía para mejorar exploración y estabilidad.
+
+Como banco de pruebas análogo, el equilibrio de una esfera sobre una superficie (familia \emph{ball-on-plate/beam}) ilustra los retos de control con contacto, fricción y acciones continuas gobernadas por inclinación. En visión por refuerzo, se ha mostrado que políticas parametrizadas por CNN pueden estabilizar y seguir objetivos en escenarios con dinámica parcialmente observada \cite{Levine2016EndToEnd}. Para simulación física, PyBullet se ha convertido en una herramienta ampliamente adoptada en DRL por su soporte de contactos, restricciones, integración rápida y API en Python \cite{Coumans2016PyBullet}.
+
+A pesar de estos avances, la literatura sobre plataformas Stewart \emph{simplificadas} de 3~GDL gobernadas por DRL desde observaciones visuales directas sigue siendo limitada. Este trabajo contribuye en esa dirección mediante: (i) un entorno PyBullet con cierres cinemáticos impuestos en tiempo de ejecución, (ii) observaciones RGB apiladas, y (iii) entrenamiento con PPO orientado a mantener la esfera en una región céntrica de la plataforma.
+
+\section{Diseño del sistema}
+Se emplea una plataforma paralela tipo Stewart simplificada con tres grados de libertad (3~GDL), concebida específicamente para este estudio. El modelo geométrico se desarrolló en CAD y se exportó como mallas STL; la cinemática y las propiedades inerciales se describieron en URDF. La plataforma superior, de geometría triangular, es accionada por tres conjuntos biela–manivela distribuidos a $120^\circ$ sobre la base. Cada actuador se modela mediante articulaciones revolutas con límites $\pm 1.57$~rad y acotaciones de velocidad y esfuerzo, reproduciendo el comportamiento de servomotores. Debido a la imposibilidad del URDF de representar lazos cinemáticos cerrados, la estructura se mantiene como árbol cinemático en la descripción y el cierre del paralelogramo se realiza en simulación mediante restricciones (véase Sec.~\ref{sec:sim}).
+
+\begin{figure}[th]
+    \centering
+    \includegraphics[width=\columnwidth]{figs/urdf.png} % ajusta la ruta si es necesario
+    \caption{Modelo URDF de la plataforma Stewart simplificada (3 GDL) con mallas STL y articulaciones revolutas.}
+    \label{fig:urdf}
+\end{figure}
+\begin{figure}[th]
+    \centering
+    \includegraphics[width=\columnwidth]{figs/urdf_perspective.png} % ajusta la ruta si es necesario
+    \caption{Vistas complementaria del modelo URDF de la plataforma.}
+    \label{fig:urdf-perspective}
+\end{figure}
+
+
+\section{Simulación en PyBullet}
+Se desarrolló un entorno de simulación física utilizando PyBullet, replicando las características dinámicas del sistema físico. Se incorporaron restricciones de movimiento y detección precisa de colisiones, así como una pelota simulada que responde a la inclinación de la plataforma.
+
+\subsection{Configuración del motor físico}
+Se utilizó un paso de integración de $\Delta t=1$~ms (1~kHz). Por cada acción del agente se ejecutan cuatro subpasos de integración, obteniéndose una frecuencia de control efectiva de $\approx 250$~Hz. El solucionador se configuró con 300 iteraciones y términos de estabilización $\texttt{ERP}=\texttt{contactERP}=\texttt{frictionERP}=0.85$ y $\texttt{CFM}=10^{-7}$, con gravedad $g=-9{.}81~\mathrm{m/s^2}$. En la plataforma superior se fijó fricción lateral $0.12$ y fricciones de rodadura y giro nulas, con el objeto de preservar sensibilidad a pequeñas inclinaciones sin introducir deriva numérica.
+
+\subsection{Cierre cinemático en tiempo de ejecución}
+Dado que URDF no admite lazos cinemáticos cerrados, el cierre entre las puntas de los eslabones y la plataforma superior se impone en tiempo de ejecución mediante dos restricciones por eslabón: (i) \texttt{JOINT\_POINT2POINT}, para co-localizar puntos de anclaje en marcos locales, y (ii) una restricción \texttt{JOINT\_GEAR} de razón unitaria alrededor de la normal de la plataforma, que atenúa el giro relativo (\emph{twist}). Este esquema mantiene la descripción cinemática como árbol en URDF, a la vez que recupera en simulación el comportamiento de un mecanismo con eslabones pasivos.
+
+\subsection{Modelo de contacto y dinámica de la esfera}
+La esfera se modeló con radio $r_b=8$~mm y masa efectiva $m_b\approx 18$~g. Se empleó restitución $10^{-3}$, fricción lateral $0.15$, fricción de rodadura y de giro $10^{-4}$, y amortiguamientos lineal y angular de $10^{-3}$. Estos valores reducen el rebote y el \emph{jitter} numérico sin sacrificar responsividad a perturbaciones pequeñas.
+
+\begin{table}[th]
+\centering
+\caption{Parámetros físicos y numéricos de la simulación}
+\label{tab:sim-params}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{ll}
+\hline
+Paso de simulación & $1$ ms; $4$ subpasos por acción \\
+Iteraciones del solver & $300$ \\
+ERP / contactERP / frictionERP & $0.85 / 0.85 / 0.85$ \\
+CFM global & $10^{-7}$ \\
+Gravedad & $-9{.}81~\mathrm{m/s^2}$ \\
+Esfera: radio / masa & $0.008$ m / $0.018$ kg \\
+Esfera: restitución & $0.001$ \\
+Esfera: fricción lat./rod./giro & $0.15 / 10^{-4} / 10^{-4}$ \\
+Esfera: amortiguamiento lin./ang. & $0.001 / 0.001$ \\
+Top: fricción lat./rod./giro & $0.12 / 0 / 0$ \\
+\hline
+\end{tabular}
+\end{table}
+
+
+
+\section{Modelamiento del entorno y del agente}
+\label{sec:modelado}
+
+\subsection{Espacios de observación y acción}
+El entorno (\texttt{StewartBalanceEnv}) expone observaciones visuales RGB de tamaño $84{\times}84$ píxeles. Para dotar de inercia visual, se apilan $4$ cuadros consecutivos mediante \texttt{FrameStackObservation}, obteniéndose un tensor $\mathbf{o}_t \in [0,255]^{84\times 84\times 12}$ que se normaliza a $[0,1]$ y se reordena a formato CHW (\texttt{ToCHW}).\\
+El espacio de acción es continuo, $\mathcal{A}=[-1,1]^3$, y se interpreta como comandos normalizados para tres articulaciones. Cada acción se escala por un factor $\alpha{=}0.3$~rad y se aplica en \textit{position control} de PyBullet con fuerza máxima $80$~N$\cdot$m; por paso del entorno se integran $4$ subpasos de simulación.
+
+\subsection{Función de recompensa}
+La señal de recompensa es densa y suave, diseñada para entornos continuos. Sea
+$A,B,C\in\mathbb{R}^2$ el triángulo de la plataforma superior en coordenadas locales,
+$\mathbf{x}_t\!\in\!\mathbb{R}^2$ la proyección local de la bola y
+$\mathbf{c}$ el circuncentro del triángulo.
+Definimos el radio de normalización
+$
+r_{\max}=\max\{\|\!A-\mathbf{c}\!\|,\|\!B-\mathbf{c}\!\|,\|\!C-\mathbf{c}\!\|\}
+$
+y la distancia normalizada
+$
+d_t=\|\mathbf{x}_t-\mathbf{c}\|/(r_{\max}+10^{-8}).
+$
+Sea además $\Delta\mathbf{a}_t=\mathbf{a}_t-\mathbf{a}_{t-1}$ el incremento de acción.
+La recompensa total es
+\begin{equation}
+\label{eq:rt-sum}
+r_t \;=\; r_t^{\mathrm{prog}} \;+\; r_t^{\mathrm{pot}} \;+\;
+r_t^{\mathrm{in}} \;+\; r_t^{\mathrm{vel}} \;+\;
+r_t^{\Delta} \;+\; r_t^{\mathrm{alive}} .
+\end{equation}
+
+\paragraph{Progreso radial.}
+Favorece acercarse al centro entre pasos consecutivos:
+\begin{equation}
+r_t^{\mathrm{prog}} \;=\; w_{\mathrm{prog}}\,(d_{t-1}-d_t), \qquad w_{\mathrm{prog}}=0.50.
+\end{equation}
+
+\paragraph{Potencial centrípeto.}
+Un pozo cuadrático suave estabiliza en la vecindad del centro:
+\begin{equation}
+r_t^{\mathrm{pot}} \;=\; -\,w_{\mathrm{pot}}\, d_t^2, \qquad w_{\mathrm{pot}}=0.10.
+\end{equation}
+
+\paragraph{``Inside'' suave.}
+Sea $(u,v,w)$ la coordenada baricéntrica de $\mathbf{x}_t$ respecto de $(A,B,C)$ y
+$m=\tfrac{1}{2}r_b$ un margen proporcional al radio de la bola $r_b$.
+Se usa una transición suave tipo \emph{smoothstep}
+\[
+s(a,b,x)=t^2(3-2t),\;\; t=\mathrm{clip}\!\left(\frac{x-a}{b-a},\,0,1\right),
+\]
+aplicada a $x_{\min}=\min\{u,v,w\}$:
+\begin{equation}
+r_t^{\mathrm{in}} \;=\; w_{\mathrm{in}}\bigl(2\,s(-m,\,+m,\,x_{\min})-1\bigr),
+\qquad w_{\mathrm{in}}=0.20 .
+\end{equation}
+Este término evita discontinuidades en el borde del triángulo.
+
+\paragraph{Velocidad cerca del centro.}
+Se penaliza la velocidad de la bola sólo cuando $d_t$ es pequeño,
+mediante una ventana gaussiana $\,\mathrm{near}(d_t)=\exp(-(d_t/\sigma)^2)$:
+\begin{equation}
+r_t^{\mathrm{vel}} \;=\; -\,w_{\mathrm{vel}}\,
+\mathrm{near}(d_t)\,\frac{\|\dot{\mathbf{x}}_t\|}{v_{\mathrm{ref}}+10^{-8}},
+\quad \sigma=0.25,\; v_{\mathrm{ref}}=0.10~\mathrm{m/s},\;
+w_{\mathrm{vel}}=0.05 .
+\end{equation}
+
+\paragraph{Suavidad de acción y bono de vida.}
+\begin{equation}
+r_t^{\Delta} \;=\; -\,\kappa_{\Delta}\,\|\Delta\mathbf{a}_t\|_2,
+\qquad \kappa_{\Delta}=0.01,
+\qquad
+r_t^{\mathrm{alive}} \;=\; 10^{-3}.
+\end{equation}
+
+
+\subsection{Criterios de terminación}
+Un episodio termina si la bola permanece fuera del triángulo durante $\geq 8$ pasos consecutivos (\texttt{out\_patience}). Se trunca al alcanzar $2000$ pasos.
+
+\subsection{Arquitectura perceptual y actor--crítico}
+Las observaciones apiladas alimentan una CNN ligera (\texttt{VisionCNN}) con tres bloques
+\mbox{Conv--ReLU} de kernel/stride $(8,4)$, $(4,2)$ y $(3,1)$, seguidos de \emph{Global Average Pooling} y una cabeza densa hasta un embedding de $256$ dimensiones.\\
+Sobre dicho embedding se montan dos cabezas:
+\begin{itemize}
+    \item \textbf{Actor}: MLP $256{\to}128{\to}3$ (ReLU intermedia) que produce la media $\boldsymbol\mu(\mathbf{o}_t)$ de una Gaussiana diagonal. La desviación estándar es global y aprendible, con parámetro $\log\boldsymbol\sigma \in [-5,2]$.
+    \item \textbf{Crítico}: MLP $256{\to}64{\to}1$ (Tanh intermedia) que estima $V(\mathbf{o}_t)$.
+\end{itemize}
+ \begin{figure}[th]
+\centering
+\begingroup\shorthandoff{<>}% evita conflictos babel
+\begin{tikzpicture}[
+  node distance=5mm and 8mm,
+  >=Latex,
+  block/.style={draw, rounded corners, thick, align=center,
+                inner sep=2.5pt, minimum width=26mm, minimum height=6.5mm,
+                font=\scriptsize},
+  line/.style={-Latex, thick}
+]
+% --- backbone (vertical) ---
+\node[block] (obs) {Obs.\\ $4\times 84\times 84$ (RGB$\times$3)};
+\node[block, below=of obs] (c1) {Conv $(8,4)$\\ReLU};
+\node[block, below=of c1] (c2) {Conv $(4,2)$\\ReLU};
+\node[block, below=of c2] (c3) {Conv $(3,1)$\\ReLU};
+\node[block, below=of c3] (gap){AvgPool (global)};
+\node[block, below=of gap] (emb){$z\in \mathbb{R}^{256}$};
+
+% --- ramas actor / crítico ---
+\node[block, below left=8mm and 8mm of emb] (act1){\textbf{Actor}\\ FC $256\!\rightarrow\!128\!\rightarrow\!3$};
+\node[block, below=of act1] (squash){$\tanh(\mathcal{N}(\mu,\sigma))$\\ acción $\in[-1,1]^3$};
+
+\node[block, below right=8mm and 8mm of emb] (crt1){\textbf{Crítico}\\ FC $256\!\rightarrow\!64\!\rightarrow\!1$};
+\node[block, below=of crt1] (value){$V(o_t)$};
+
+% --- conexiones ---
+\draw[line] (obs) -- (c1);
+\draw[line] (c1) -- (c2);
+\draw[line] (c2) -- (c3);
+\draw[line] (c3) -- (gap);
+\draw[line] (gap) -- (emb);
+\draw[line] (emb) -| (act1);
+\draw[line] (emb) -| (crt1);
+\draw[line] (act1) -- (squash);
+\draw[line] (crt1) -- (value);
+\end{tikzpicture}
+\endgroup
+\caption{\footnotesize Arquitectura resumida. Backbone Conv–Conv–Conv–AvgPool $\to z\in\mathbb{R}^{256}$; la rama \textbf{actor} (FC $256\!\to\!128\!\to\!3$) produce $\tanh(\mathcal N(\mu,\sigma))$; la rama \textbf{crítico} (FC $256\!\to\!64\!\to\!1$) estima $V(o_t)$.}
+\label{fig:arch-vert}
+\end{figure}
+ 
+
+La política se implementa como una Gaussiana ``aplastada'' por $\tanh$ (distribución \emph{Tanh-squashed}) para respetar $\mathcal{A}=[-1,1]^3$. Durante el muestreo se utiliza \texttt{rsample} (reparametrización), y la probabilidad corregida incorpora el jacobiano de $\tanh$; para la bonificación de entropía se emplea la entropía aproximada de la Gaussiana base. Todas las capas lineales y convolucionales utilizan inicialización ortogonal.
+
+\subsection{Entrenamiento}
+Se utiliza PPO \cite{Schulman2017PPO} con estimación de ventajas GAE($\gamma{=}0.99$, $\lambda{=}0.98$) y objetivo con \emph{clipping} $\epsilon{=}0.2$. Las ventajas se normalizan por minibatch. Las observaciones \texttt{uint8} se escalan a $[0,1]$. El entrenamiento se organiza en \emph{rollouts} de $n{=}1024$ pasos seguidos de $E{=}4$ épocas sobre minibatches de $B{=}64$. Se aplica \texttt{clip\_grad\_norm} con umbral $0.5$. La pérdida total es
+\[
+\mathcal{L} \;=\; \mathcal{L}_{\mathrm{PPO}} \;+\; c_v\,\mathcal{L}_{\mathrm{value}} \;-\; c_{\mathrm{ent}}(t)\,\mathcal{H},
+\]
+con $c_v{=}0.5$ y un coeficiente de entropía $c_{\mathrm{ent}}(t)$ que se reduce linealmente (annealing) desde $10^{-3}$ hasta $0$ durante el $10\%$ inicial de los pasos de entrenamiento, favoreciendo exploración temprana y explotación posterior.
+
+\begin{table}[t]
+\centering
+\caption{Hiperparámetros principales del entorno}
+\label{tab:env-hp}
+\begin{tabular}{ll}
+\hline
+Parámetro & Valor \\
+\hline
+Resolución / stack & $84{\times}84$ / $4$ frames \\
+Acción $\alpha$ (rad) & $0.3$ (escala) \\
+Subpasos por paso & $4$ a $1$~kHz \\
+$z_{\text{drop}}$ (m) & $-0.01$ \\
+\texttt{out\_patience} & $8$ \\
+$k_{\mathrm{in}},k_{\mathrm{out}}$ & $0.1,\;0.1$ \\
+$k_c, k_{\Delta}$ & $1.0,\;0.01$ \\
+$k_{\mathrm{stay}},\,\tau$ & $0.2,\;0.1\,r_{\max}$ \\
+\hline
+\end{tabular}
+\end{table}
+ 
+
+
+\section{Entrenamiento con Proximal Policy Optimization}
+El agente se entrena con PPO en régimen \emph{on-policy} a partir de \emph{rollouts} de $n{=}1024$ pasos. Cada actualización itera $E{=}6$ épocas sobre mini\-batches de tamaño $B{=}256$, con optimizador Adam (lr $3\!\times\!10^{-4}$, $\varepsilon{=}10^{-5}$) y recorte de gradiente $\|\nabla\|_2\le 0.5$. Las imágenes \texttt{uint8} se escalan a $[0,1]$; las ventajas se normalizan por minibatch.
+
+\paragraph{Estimación de ventajas (GAE).}
+Con $\gamma{=}0.99$ y $\lambda{=}0.98$,
+\begin{align}
+\delta_t &= r_t + \gamma\,V_\theta(o_{t+1}) - V_\theta(o_t),\\
+\hat A_t &= \sum_{l=0}^{T-t-1} (\gamma\lambda)^l\,\delta_{t+l},\qquad
+R_t \,=\, \hat A_t + V_\theta(o_t).
+\end{align}
+
+\paragraph{Objetivo de PPO.}
+Sea $r_t(\theta)=\exp\!\bigl(\log\pi_\theta(a_t|o_t)-\log\pi_{\theta_{\mathrm{old}}}(a_t|o_t)\bigr)$ el cociente de probabilidades. La pérdida por política con \emph{clipping} ($\varepsilon{=}0.2$) es
+\begin{equation}
+\mathcal{L}_{\mathrm{PPO}}
+= -\,\mathbb{E}\!\left[
+\min\!\bigl(r_t(\theta)\,\hat A_t,\;
+\mathrm{clip}(r_t(\theta),\,1-\varepsilon,\,1+\varepsilon)\,\hat A_t\bigr)
+\right].
+\end{equation}
+
+\paragraph{Pérdidas de valor y entropía.}
+La función de valor se ajusta por MSE y se añade una bonificación entrópica para favorecer la exploración:
+\begin{equation}
+\mathcal{L} \;=\;
+\mathcal{L}_{\mathrm{PPO}}
+\;+\; c_v\,\mathbb{E}\!\left[(V_\theta(o_t)-R_t)^2\right]
+\;-\; c_{\mathrm{ent}}(t)\,\mathbb{E}\!\left[\mathcal{H}\!\left(\pi_\theta(\cdot|o_t)\right)\right].
+\end{equation}
+Se emplea $c_v{=}0.5$ y un \emph{annealing} lineal del coeficiente entrópico:
+\[
+c_{\mathrm{ent}}(t)=
+\max\!\left(c_{\min},\; c_0\Bigl(1-\tfrac{t}{T_a}\Bigr)\right),\quad
+c_0{=}0.01,\; c_{\min}{=}10^{-4},\; T_a{=}0.1\,T,
+\]
+donde $T$ es el número total de pasos de entrenamiento. La política es gaussiana diagonal “aplastada” con $\tanh$; las acciones se muestrean con reparametrización y la \emph{log-prob} se corrige con el jacobiano de $\tanh$.
+
+\paragraph{Protocolo de actualización.}
+\begin{enumerate}
+\item Recolectar $n$ transiciones $\{o_t,a_t,r_t\}$ con $\pi_{\theta_{\mathrm{old}}}$.
+\item \textit{Bootstrap} con $V_\theta(o_{T})$ y computar $\hat A_t$, $R_t$ (GAE).
+\item Barajar el buffer y optimizar durante $E$ épocas sobre mini\-batches:
+  \begin{itemize}
+  \item Normalizar $\hat A_t$ por minibatch.
+  \item Calcular $\mathcal{L}$ y hacer \texttt{backprop} con \texttt{clip\_grad\_norm}.
+  \end{itemize}
+\item Actualizar $\theta_{\mathrm{old}}\!\leftarrow\!\theta$; registrar métricas (pérdidas, entropía, norma del gradiente, retorno/longitud de episodio) en TensorBoard.
+\end{enumerate}
+
+\section{Resultados}
+Tras varias iteraciones de entrenamiento, el agente logra mantener la pelota dentro de la región central durante largos periodos, mostrando aprendizaje emergente de estabilidad y control suave. Se incluyen curvas de recompensa y capturas del comportamiento.
+
+\section{Conclusión y trabajo futuro}
+Los resultados validan la viabilidad de aplicar PPO para controlar plataformas Stewart simplificadas. Se propone como trabajo futuro la extensión a plataformas con 6 GDL y control directo del actuador físico.
+
+\section*{Agradecimientos}
+Este trabajo fue desarrollado de manera independiente como parte de una investigación personal en el área de robótica e inteligencia artificial aplicada.
+
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{00}
+
+\bibitem{Stewart1965}
+D.~Stewart, ``A platform with six degrees of freedom,'' \emph{Proceedings of the Institution of Mechanical Engineers}, vol.~180, no.~1, pp.~371--386, 1965.
+
+\bibitem{Merlet2006}
+J.-P.~Merlet, \emph{Parallel Robots}, 2nd~ed. Springer, 2006.
+
+\bibitem{Schulman2017PPO}
+J.~Schulman, F.~Wolski, P.~Dhariwal, A.~Radford, and O.~Klimov, ``Proximal Policy Optimization Algorithms,'' \emph{arXiv:1707.06347}, 2017.
+
+\bibitem{Lillicrap2016DDPG}
+T.~P.~Lillicrap, J.~J.~Hunt, A.~Pritzel, et~al., ``Continuous control with deep reinforcement learning,'' in \emph{Proc.\ ICLR}, 2016.
+
+\bibitem{Haarnoja2018SAC}
+T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine, ``Soft Actor-Critic: Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor,'' in \emph{Proc.\ ICML}, pp.~1861--1870, 2018.
+
+\bibitem{Levine2016EndToEnd}
+S.~Levine, P.~Pastor, A.~Krizhevsky, and D.~Quillen, ``Learning hand-eye coordination for robotic grasping with deep learning and large-scale data collection,'' \emph{Int.\ J.\ Robotics Research}, vol.~37, no.~4--5, pp.~421--436, 2018. % (versión preliminar: arXiv:1603.02199)
+
+\bibitem{Coumans2016PyBullet}
+E.~Coumans and Y.~Bai, ``PyBullet, a Python module for physics simulation for games, robotics and machine learning,'' 2016--2021. [Online]. Available: \url{https://pybullet.org}
+
+\end{thebibliography}
+
+\end{document}

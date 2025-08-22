@@ -111,7 +111,7 @@ def main(
     # Modelo + algoritmo PPO
     # ------------------------------
     model = ActorCriticCNN(action_dim=action_dim, obs_shape=obs_shape).to(device)
-    algo = PPO(model=model, obs_shape=obs_shape, action_dim=action_dim, device=device)
+    algo = PPO(model=model, obs_shape=obs_shape, action_dim=action_dim, device=device, total_steps=total_steps)
     buffer = RolloutBuffer(n_steps, obs_shape, action_dim, device)
 
     # ------------------------------
@@ -189,8 +189,8 @@ def main(
             obs = next_obs
 
             if step % img_log_every == 0:
-                last3 = torch.from_numpy(obs[-3:, :, :])  # (3,H,W)
-                writer.add_image("obs/last_frame", last3, global_step=step)
+                last3 = torch.from_numpy(obs[-3:, :, :])  # (3,H,W), uint8
+                writer.add_image("obs/last_frame", last3, global_step=step, dataformats="CHW")
 
             if done:
                 ep_idx += 1
@@ -209,13 +209,13 @@ def main(
             obs_t = torch.from_numpy(obs).unsqueeze(0).to(device)  # (1,C,H,W)
             obs_t = obs_t.float().div(255.0)
             
-            _, last_value = model.forward(obs_t)
+            _, _, last_value = model.forward(obs_t)
             last_value = float(last_value.item())
         buffer.compute_returns_adv(last_value)
         algo.last_mean_advantage = float(buffer.advantages[:buffer.ptr].mean())
 
         # --- update PPO ---
-        losses = algo.update(buffer=buffer, epochs=4, batch_size=64)
+        losses, ent_coef_used = algo.update(buffer=buffer)
         arr = np.array(losses)
         pl, vl, ent = arr[:, 0].mean(), arr[:, 1].mean(), arr[:, 2].mean()
         grad = arr[:, 3].mean()
@@ -223,6 +223,7 @@ def main(
         writer.add_scalar("loss/policy",  pl,  global_step=step)
         writer.add_scalar("loss/value",   vl,  global_step=step)
         writer.add_scalar("loss/entropy", ent, global_step=step)
+        writer.add_scalar("loss/entropy_coef", ent_coef_used, global_step=step)
         writer.add_scalar("loss/grad_norm", grad, global_step=step)
         writer.add_scalar("advantage/mean", algo.last_mean_advantage, global_step=step)
         writer.add_scalar("advantage/std", buffer.advantages[:buffer.ptr].std(), global_step=step)

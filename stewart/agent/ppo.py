@@ -24,8 +24,9 @@ class PPO:
         gae_lambda=0.98,
         clip_coef=0.2,
         vf_coef=0.5,
-        ent_coef=0.001,
+        ent_coef=0.01,
         max_grad_norm=0.5,
+        total_steps=500000,
     ):
         """
         Inicializa el agente PPO.
@@ -57,21 +58,13 @@ class PPO:
         self.last_mean_advantage = 0.0
 
         self.ent_coef_base = ent_coef
-        self.entropy_anneal_pct = 0.1  # o recíbelo como argumento también si quieres que sea configurable
-        self.total_steps = int(1e6)    # también configurable
+        self.entropy_anneal_pct = 0.1   
+        self.total_steps = total_steps      
+        self.ent_coef_min = 1e-4  
         self.entropy_anneal_steps = int(self.total_steps * self.entropy_anneal_pct)
         self.current_step = 0
 
-        self.buffer = RolloutBuffer(
-            n_steps,
-            (
-                (obs_shape[1], obs_shape[2], obs_shape[0])
-                if obs_shape[0] in (1, 3)
-                else obs_shape
-            ),
-            action_dim,
-            device,
-        )
+        self.buffer = None
 
     @torch.no_grad()
     def _obs_to_tensor(self, obs):
@@ -91,7 +84,10 @@ class PPO:
         Lista con [policy_loss, value_loss, entropy] por minibatch.
         """
         progress = min(self.current_step / self.entropy_anneal_steps, 1.0)
-        current_ent_coef = self.ent_coef_base * (1.0 - progress)
+        current_ent_coef = max(
+            self.ent_coef_min, 
+            self.ent_coef_base * (1.0 - progress)
+        )
 
         buf = buffer if buffer is not None else self.buffer
         epochs = epochs or self.epochs
@@ -101,7 +97,7 @@ class PPO:
         for _ in range(epochs):
             for obs_b, act_b, oldlog_b, adv_b, ret_b in buf.get(batch_size):
                 # Normalización de ventajas
-                adv_b = ((adv_b - adv_b.mean()) / (adv_b.std() + 1e-8)).detach()
+                adv_b = (adv_b - adv_b.mean()) / (adv_b.std() + 1e-8)
 
                 # Normalización de observaciones (de 0 a 1)
                 if obs_b.dtype == torch.uint8:
@@ -125,8 +121,12 @@ class PPO:
                 # Bonificación por entropía (fomenta exploración)
                 ent = entropy.mean() if hasattr(entropy, "mean") else entropy
 
+                logstd_target = -0.5
+                beta_std = 1e-4  # empezar pequeño
+                std_reg = beta_std * (self.model.logstd - logstd_target).pow(2).sum()
+
                 # Pérdida total
-                loss = pg_loss + self.vf_coef * v_loss - current_ent_coef * ent
+                loss = pg_loss + self.vf_coef * v_loss - current_ent_coef * ent + std_reg
 
                 # Backpropagation
                 self.opt.zero_grad(set_to_none=True)
@@ -142,5 +142,5 @@ class PPO:
                 self.opt.step()
 
                 out.append([pg_loss.item(), v_loss.item(), ent.item(), grad_norm])
-
-        return out
+        self.current_step += self.n_steps
+        return out, current_ent_coef

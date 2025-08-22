@@ -42,12 +42,12 @@ class StewartBalanceEnv(gym.Env):
         self,
         img_size=84,
         use_gui=False,
-        action_scale: float = 0.4,
+        action_scale: float = 0.3,
         k_in: float = 0.1,
         k_out: float = 0.1,
         k_center: float = 1.0,
         k_delta_a: float = 0.01,
-        max_steps: int = 1000,
+        max_steps: int = 2000,
         spawn_margin_frac: float = 0.3,
         # ---- cámara/GUI -> Core ----
         cam_mode: str = "fixed",
@@ -118,7 +118,7 @@ class StewartBalanceEnv(gym.Env):
             cam_eye_world=(0.0, 0.0, 0.32),
             cam_center_world=(0.0, 0.0, 0.10),
             cam_up_world=(0.0, 1.0, 0.0),
-            render_camera=True,
+            render_camera=False,
         )
         env = FrameStackObservation(env, stack_size=4)
         env = ResetDelayWrapper(env, steps=2)
@@ -277,60 +277,94 @@ class StewartBalanceEnv(gym.Env):
             pass
         self.core.close()
 
+    def _smoothstep(self, a, b, x):
+        # 0 en x<=a, 1 en x>=b, suave en medio
+        t = np.clip((x - a) / (b - a + 1e-12), 0.0, 1.0)
+        return t * t * (3.0 - 2.0 * t)
+
     def reward(self):
         """
-        Cálculo del reward total por paso:
+        Recompensa densa y suave para control continuo.
 
         Componentes:
-        - `center_reward`: shaping que premia la cercanía al centro (lineal).
-        - `inside_reward`: bonus si está dentro del triángulo, penalización si está fuera.
-        - `delta_a_penalty`: penalización por cambios bruscos de acción.
-        - `survival_reward`: pequeña recompensa constante por cada paso no terminado.
-
-        Retorna:
-            reward_total: float
-            info: dict con métricas útiles para debug/log
+        - r_progress: progreso radial hacia el centro (normalizado).
+        - r_potential: pozo cuadrático suave que retiene en el centro.
+        - r_inside: "estar dentro" suave con margen (sin saltos).
+        - r_vel: penaliza velocidad de la bola SOLO cerca del centro.
+        - r_da: penaliza cambios bruscos de acción (ya calculado).
+        - r_alive: pequeña recompensa constante por paso.
         """
+
+        # --- Geometría / posiciones ---
         A, B, C, _, _ = self.core._get_top_vertices_xy()
-        ball_pos = np.array(self.core.get_ball_local_xy(), dtype=np.float64)
+        ball_pos   = np.array(self.core.get_ball_local_xy(), dtype=np.float64)
         center_pos = np.array(circumcenter_local_xy(A, B, C), dtype=np.float64)
-        dist_center = np.linalg.norm(ball_pos - center_pos)
 
-        # Recompensa por cercanía al centro (shaping)
-        rmax_geom = (
-            max(
-                np.linalg.norm(np.array(v) - center_pos)
-                for v in self.core.get_top_triangle_xy()
-            )
-            + 1e-8
-        )
+        # Radio de normalización (ya lo calculas en reset y lo guardas)
+        rmax = float(self._rmax_local)  # metros (en plano local XY)
 
-        # Esta función premia la cercanía de forma suave y continua
-        center_reward = self.k_center * (1.0 - (dist_center / rmax_geom) ** 2)
+        # Distancias normalizadas (0 = centro; ~1 = borde)
+        dist      = float(np.linalg.norm(ball_pos - center_pos))
+        prev_dist = float(np.linalg.norm(self._prev_ball_xy - center_pos))
+        d      = dist      / (rmax + 1e-8)
+        d_prev = prev_dist / (rmax + 1e-8)
 
-        # Recompensa por estar dentro del triángulo (o penalización)
-        inside = self._is_ball_inside_top(ball_pos)
-        if inside:
-            inside_reward = self.k_in
-        else:
-            inside_reward = -self.k_out
+        # --- 1) Progreso radial (densa; positiva si te acercas) ---
+        # Acotado en [-w_prog, w_prog]
+        w_prog = 0.50
+        r_progress = w_prog * (d_prev - d)
 
-        # Penalización por cambios bruscos
-        delta_a_penalty = -self.k_delta_a * self._last_delta_a
+        # --- 2) Potencial (pozo suave en el centro) ---
+        # En [-w_pot, 0]; ayuda a estabilizar cuando ya está cerca
+        w_pot = 0.10
+        r_potential = -w_pot * (d ** 2)
 
-        # Recompensa por sobrevivir (constante)
-        survival_reward = 0.001
+        # --- 3) Inside suave (sin discontinuidades) ---
+        # Usa barycéntricas y un margen ~ radio de la bola para transicionar suave.
+        u, v, w = barycentric(ball_pos, A, B, C)
+        min_bary = float(min(u, v, w))
+        ball_r = float(getattr(self.core, "ball_r", 0.008))
+        margin = 0.5 * ball_r  # margen en coord. baricéntricas ~ metros proyectados
 
-        # Recompensa total
-        total_reward = center_reward + inside_reward + delta_a_penalty + survival_reward
+        inside_soft01 = self._smoothstep(-margin, +margin, min_bary)  # [0,1]
+        # Centrar en [-1,1] y escalar:
+        w_inside = 0.20
+        r_inside = w_inside * (2.0 * inside_soft01 - 1.0)
+
+        # --- 4) Amortiguar velocidad cerca del centro ---
+        # Solo penaliza si está relativamente cerca (gaussiano en d)
+        speed = float(self._last_ball_speed)     # m/s, ya lo calculaste
+        sigma_vel = 0.25                         # cuanto "cerca" (en unidades de d)
+        near = np.exp(- (d / sigma_vel) ** 2)    # [0,1], ~1 cuando d ~ 0
+        v_ref = 0.10                            # m/s de referencia (ajusta según sim)
+        w_vel = 0.05
+        r_vel = - w_vel * near * (speed / (v_ref + 1e-8))
+
+        # --- 5) Suavidad de acción (lo mantengo tal cual) ---
+        r_da = - self.k_delta_a * self._last_delta_a
+
+        # --- 6) Alive bonus pequeño ---
+        r_alive = 0.001
+
+        # Total
+        total_reward = r_progress + r_potential + r_inside + r_vel + r_da + r_alive
+
+        # Señal "inside" booleana solo para logging (no para el agente)
+        inside_bool = bool(min_bary >= 0.0)
 
         return total_reward, {
-            "inside_top": bool(inside),
-            "center_score": float(center_reward),
+            "inside_top": inside_bool,
+            "center_score": float(-r_potential),   # magnitud de atracción (para interpretar)
             "center_local": center_pos.astype(np.float32),
             "ball_local": ball_pos.astype(np.float32),
             "delta_a": float(self._last_delta_a),
-            "dist_center": float(dist_center),
+            "dist_center": float(dist),
+            "d_norm": float(d),
+            "r_progress": float(r_progress),
+            "r_potential": float(r_potential),
+            "r_inside": float(r_inside),
+            "r_vel": float(r_vel),
+            "r_da": float(r_da),
         }
     
     ## Helpers
